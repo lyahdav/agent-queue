@@ -13,7 +13,7 @@ Each task gets a fresh agent context by launching a new CLI process, initially
 Create a `Projects` tab with these headers:
 
 ```text
-Project ID | Enabled | Sheet Name | Repo Path | Default Branch | Agent | Command File | Verify Command | Poll Seconds
+Project ID,Enabled,Sheet Name,Repo Path,Default Branch,Agent,Command File,Verify Command,Poll Seconds
 ```
 
 Keep the columns in this order. The Apps Script reads project rows by column
@@ -36,7 +36,7 @@ Project columns:
 Create one task tab per project. Each task tab uses these headers:
 
 ```text
-ID | Status | Task | Commit SHAs | Redo Reason | Claimed At | Updated At | Last Error
+ID,Status,Task,Commit SHAs,Redo Reason,Claimed At,Updated At,Last Error
 ```
 
 Supported actionable statuses:
