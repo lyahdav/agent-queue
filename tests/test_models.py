@@ -19,7 +19,20 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(project.sheet_name, "demo")
         self.assertEqual(project.default_branch, "main")
         self.assertEqual(project.agent, "codex")
+        self.assertFalse(project.use_tdd)
         self.assertEqual(project.poll_seconds, 30)
+
+    def test_project_parses_tdd_flag(self):
+        project = Project.from_json(
+            {
+                "projectId": "demo",
+                "enabled": True,
+                "repoPath": "/tmp/demo",
+                "tdd": "yes",
+            }
+        )
+
+        self.assertTrue(project.use_tdd)
 
     def test_task_preserves_claimed_from(self):
         task = Task.from_json(

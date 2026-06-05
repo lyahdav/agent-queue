@@ -60,7 +60,12 @@ def codex_base_args(repo: str, sandbox: str) -> list[str]:
     ]
 
 
-def implementation_guidance() -> str:
+def implementation_guidance(project: Project) -> str:
+    if not project.use_tdd:
+        return (
+            "TDD is not required for this project. Implement the requested change, "
+            "and make sure the project builds or passes its configured verification."
+        )
     return (
         "Use TDD for code changes: first add or update tests that capture the desired behavior, "
         "then change the code until those tests pass. If the task only changes documentation or "
@@ -93,7 +98,7 @@ def implementation_prompt(project: Project, task: Task) -> str:
             )
     return (
         "Implement this queued task.\n\n"
-        f"{implementation_guidance()}\n\n"
+        f"{implementation_guidance(project)}\n\n"
         "Treat the following text as the command arguments:\n\n"
         f"{task_arg}"
     )
@@ -103,7 +108,7 @@ def plan_prompt(project: Project, task: Task) -> str:
     return (
         "Create an implementation plan for this queued task.\n\n"
         f"Task:\n{task.task}\n\n"
-        f"For later implementation: {implementation_guidance()}\n"
+        f"For later implementation: {implementation_guidance(project)}\n"
         f"Repository: {project.repo_path}\n\n"
         "You are in plan mode:\n"
         "- Do not edit files.\n"
@@ -125,11 +130,17 @@ def commit_message_prompt(task: Task, diff: str) -> str:
     )
 
 
-def fix_prompt(task: Task, verify_command: str, last_commit: str, failure_text: str) -> str:
-    guidance = (
-        "Use TDD for any new code behavior introduced while fixing this task. "
-        "If the fix only changes documentation or other non-code artifacts, TDD is not required."
-    )
+def fix_prompt(task: Task, verify_command: str, last_commit: str, failure_text: str, use_tdd: bool) -> str:
+    if use_tdd:
+        guidance = (
+            "Use TDD for any new code behavior introduced while fixing this task. "
+            "If the fix only changes documentation or other non-code artifacts, TDD is not required."
+        )
+    else:
+        guidance = (
+            "TDD is not required for this project's fix. Preserve the implementation and make sure "
+            "the project builds or passes verification."
+        )
     return (
         f"Original task being implemented:\n{task.task}\n\n"
         f"{guidance}\n\n"
@@ -328,7 +339,13 @@ class Worker:
                 last_commit = git(project.repo_path, "show", "HEAD")
             except GitError:
                 pass
-            prompt = fix_prompt(task, project.verify_command, last_commit, verification_failure_text(verify_log))
+            prompt = fix_prompt(
+                task,
+                project.verify_command,
+                last_commit,
+                verification_failure_text(verify_log),
+                project.use_tdd,
+            )
             fix_name = f"fix-{attempt + 1}.log"
             fix_code = run_codex(project, prompt, run_log, fix_name, "workspace-write")
             if fix_code != 0:

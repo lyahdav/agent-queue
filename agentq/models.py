@@ -18,6 +18,7 @@ class Project:
     repo_path: str
     default_branch: str
     agent: str
+    use_tdd: bool
     verify_command: str
     poll_seconds: int
 
@@ -37,6 +38,7 @@ class Project:
             repo_path=str(data.get("repoPath") or "").strip(),
             default_branch=str(data.get("defaultBranch") or "main").strip(),
             agent=str(data.get("agent") or "codex").strip().lower(),
+            use_tdd=_truthy(data.get("tdd")),
             verify_command=str(data.get("verifyCommand") or "").strip(),
             poll_seconds=poll_seconds,
         )
