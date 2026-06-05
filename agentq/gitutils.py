@@ -10,7 +10,10 @@ class GitError(RuntimeError):
 
 
 def git(repo: str | Path, *args: str) -> str:
-    code, stdout, stderr = run_capture(["git", *args], repo)
+    try:
+        code, stdout, stderr = run_capture(["git", *args], repo)
+    except OSError as exc:
+        raise GitError(f"cannot run git in {repo}: {exc.strerror or exc}") from exc
     if code != 0:
         raise GitError((stderr or stdout or f"git {' '.join(args)} failed").strip())
     return stdout
@@ -25,10 +28,16 @@ def status_short(repo: str | Path) -> str:
 
 
 def ensure_clean_on_branch(repo: str | Path, default_branch: str) -> tuple[bool, str]:
-    branch = current_branch(repo)
+    try:
+        branch = current_branch(repo)
+    except GitError as exc:
+        return False, str(exc)
     if branch != default_branch:
         return False, f"current branch is {branch!r}, expected {default_branch!r}"
-    dirty = status_short(repo)
+    try:
+        dirty = status_short(repo)
+    except GitError as exc:
+        return False, str(exc)
     if dirty:
         return False, "repo has uncommitted changes"
     return True, ""

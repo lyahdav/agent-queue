@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -8,6 +9,10 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on", "enabled"}
+
+
+def _repo_path(value: Any) -> str:
+    return os.path.expanduser(str(value or "").strip())
 
 
 @dataclass(frozen=True)
@@ -35,7 +40,7 @@ class Project:
             project_id=project_id,
             enabled=_truthy(data.get("enabled")),
             sheet_name=sheet_name,
-            repo_path=str(data.get("repoPath") or "").strip(),
+            repo_path=_repo_path(data.get("repoPath")),
             default_branch=str(data.get("defaultBranch") or "main").strip(),
             agent=str(data.get("agent") or "codex").strip().lower(),
             use_tdd=_truthy(data.get("tdd")),

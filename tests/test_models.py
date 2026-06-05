@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from agentq.models import Project, Task
 
@@ -21,6 +22,16 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(project.agent, "codex")
         self.assertFalse(project.use_tdd)
         self.assertEqual(project.poll_seconds, 30)
+
+    def test_project_expands_home_in_repo_path(self):
+        project = Project.from_json(
+            {
+                "projectId": "demo",
+                "repoPath": " ~/Documents/repos/demo ",
+            }
+        )
+
+        self.assertEqual(project.repo_path, str(Path.home() / "Documents/repos/demo"))
 
     def test_project_parses_tdd_flag(self):
         project = Project.from_json(
