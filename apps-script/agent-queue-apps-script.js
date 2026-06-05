@@ -5,7 +5,6 @@ var PROJECT_HEADERS = [
   "repoPath",
   "defaultBranch",
   "agent",
-  "commandFile",
   "verifyCommand",
   "pollSeconds"
 ];
@@ -96,7 +95,6 @@ function listProjects_() {
         repoPath: String(row.repoPath || "").trim(),
         defaultBranch: String(row.defaultBranch || "main").trim(),
         agent: String(row.agent || "codex").trim(),
-        commandFile: String(row.commandFile || "agents/commands/tdd.md").trim(),
         verifyCommand: String(row.verifyCommand || "").trim(),
         pollSeconds: row.pollSeconds || 30
       };

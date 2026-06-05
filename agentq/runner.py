@@ -45,13 +45,6 @@ def print_event(project_id: str, message: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {project_id}: {message}", flush=True)
 
 
-def read_command_file(repo: str, command_file: str) -> str:
-    path = Path(repo) / command_file
-    if not path.exists():
-        raise RuntimeError(f"command file does not exist: {path}")
-    return path.read_text()
-
-
 def codex_base_args(repo: str, sandbox: str) -> list[str]:
     return [
         "codex",
@@ -67,8 +60,15 @@ def codex_base_args(repo: str, sandbox: str) -> list[str]:
     ]
 
 
+def implementation_guidance() -> str:
+    return (
+        "Use TDD for code changes: first add or update tests that capture the desired behavior, "
+        "then change the code until those tests pass. If the task only changes documentation or "
+        "other non-code artifacts, such as README.md, TDD is not required."
+    )
+
+
 def implementation_prompt(project: Project, task: Task) -> str:
-    command_text = read_command_file(project.repo_path, project.command_file)
     task_arg = task.task
     if task.resume:
         task_arg += (
@@ -92,9 +92,8 @@ def implementation_prompt(project: Project, task: Task) -> str:
                 f"Approved plan:\n{task.redo_reason}"
             )
     return (
-        f"Read {project.command_file} and follow it exactly.\n\n"
-        "Command file contents:\n"
-        f"{command_text}\n\n"
+        "Implement this queued task.\n\n"
+        f"{implementation_guidance()}\n\n"
         "Treat the following text as the command arguments:\n\n"
         f"{task_arg}"
     )
@@ -104,7 +103,7 @@ def plan_prompt(project: Project, task: Task) -> str:
     return (
         "Create an implementation plan for this queued task.\n\n"
         f"Task:\n{task.task}\n\n"
-        f"Target command file for later implementation: {project.command_file}\n"
+        f"For later implementation: {implementation_guidance()}\n"
         f"Repository: {project.repo_path}\n\n"
         "You are in plan mode:\n"
         "- Do not edit files.\n"
@@ -127,8 +126,13 @@ def commit_message_prompt(task: Task, diff: str) -> str:
 
 
 def fix_prompt(task: Task, verify_command: str, last_commit: str, failure_text: str) -> str:
+    guidance = (
+        "Use TDD for any new code behavior introduced while fixing this task. "
+        "If the fix only changes documentation or other non-code artifacts, TDD is not required."
+    )
     return (
         f"Original task being implemented:\n{task.task}\n\n"
+        f"{guidance}\n\n"
         "The implementation has been committed but verification is failing. "
         "Fix the failures while preserving the task implementation. "
         "Do not revert prior work; fix forward. "

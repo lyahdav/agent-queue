@@ -18,7 +18,6 @@ class Project:
     repo_path: str
     default_branch: str
     agent: str
-    command_file: str
     verify_command: str
     poll_seconds: int
 
@@ -38,7 +37,6 @@ class Project:
             repo_path=str(data.get("repoPath") or "").strip(),
             default_branch=str(data.get("defaultBranch") or "main").strip(),
             agent=str(data.get("agent") or "codex").strip().lower(),
-            command_file=str(data.get("commandFile") or "agents/commands/tdd.md").strip(),
             verify_command=str(data.get("verifyCommand") or "").strip(),
             poll_seconds=poll_seconds,
         )

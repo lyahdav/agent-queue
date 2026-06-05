@@ -50,7 +50,6 @@ class WorkerClaimingTests(unittest.TestCase):
                 repo_path=str(repo),
                 default_branch="main",
                 agent="codex",
-                command_file="agents/commands/tdd.md",
                 verify_command="python3 -m unittest",
                 poll_seconds=5,
             )
@@ -74,7 +73,6 @@ class WorkerClaimingTests(unittest.TestCase):
                 repo_path=str(repo),
                 default_branch="main",
                 agent="codex",
-                command_file="agents/commands/tdd.md",
                 verify_command="python3 -m unittest",
                 poll_seconds=5,
             )

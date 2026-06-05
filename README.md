@@ -13,7 +13,7 @@ Each task gets a fresh agent context by launching a new CLI process, initially
 Create a `Projects` tab with these headers:
 
 ```text
-Project ID,Enabled,Sheet Name,Repo Path,Default Branch,Agent,Command File,Verify Command,Poll Seconds
+Project ID,Enabled,Sheet Name,Repo Path,Default Branch,Agent,Verify Command,Poll Seconds
 ```
 
 Keep the columns in this order. The Apps Script reads project rows by column
@@ -29,9 +29,13 @@ Project columns:
 | Repo Path | Local filesystem path to the git repository for this project. |
 | Default Branch | Branch the worker must be on before claiming tasks. Defaults to `main` when blank. |
 | Agent | Agent runner to use. Currently supported value: `codex`. Blank also defaults to `codex`; other values are reserved for future runners. |
-| Command File | Path, relative to `Repo Path`, to the instruction file included in the implementation prompt. Defaults to `agents/commands/tdd.md` when blank. |
 | Verify Command | Shell command run from `Repo Path` after the agent commits its work. This is required for implementation tasks; failures trigger the fix loop. Example: `python3 -m pytest`. |
 | Poll Seconds | How often a forever worker checks for another task when none is available. Defaults to `30`; values below `5` are raised to `5`; invalid values default to `30`. |
+
+Implementation prompts tell the agent to use TDD for code changes: add or
+update tests for the desired behavior first, then change the code until those
+tests pass. Documentation-only tasks, such as updating `README.md`, do not
+require TDD.
 
 Create one task tab per project. Each task tab uses these headers:
 
