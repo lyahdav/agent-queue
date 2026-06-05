@@ -41,6 +41,10 @@ def format_elapsed(seconds: int) -> str:
     return f"{sec}s"
 
 
+def elapsed_runtime(start: float) -> str:
+    return format_elapsed(int(time.monotonic() - start))
+
+
 def print_event(project_id: str, message: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {project_id}: {message}", flush=True)
 
@@ -179,11 +183,12 @@ def fail_task(
     run_log: RunLog,
     state: StateStore,
     reason: str,
+    runtime: str,
 ) -> None:
     preview = reason.strip()[:5000]
     run_log.event("failed", preview)
-    client.update(project.project_id, task.id, "FAILED", reason=preview, last_error=preview)
-    state.finish_run(project.project_id, run_log.run_id, status="FAILED", lastError=preview)
+    client.update(project.project_id, task.id, "FAILED", reason=preview, last_error=preview, runtime=runtime)
+    state.finish_run(project.project_id, run_log.run_id, status="FAILED", lastError=preview, runtime=runtime)
     print_event(project.project_id, f"task {task.id} FAILED")
 
 
@@ -269,13 +274,13 @@ class Worker:
         print_event(project.project_id, f"task {task.id} started; attach: agentq attach --run {run_log.run_id}")
         try:
             if task.original_status == "PLAN" or task.status == "PLAN IN PROGRESS":
-                self._process_plan(project, task, run_log)
+                self._process_plan(project, task, run_log, start)
             else:
                 self._process_implementation(project, task, run_log, start)
         except (GitError, QueueError, RuntimeError) as exc:
-            fail_task(self.client, project, task, run_log, self.state, str(exc))
+            fail_task(self.client, project, task, run_log, self.state, str(exc), elapsed_runtime(start))
 
-    def _process_plan(self, project: Project, task: Task, run_log: RunLog) -> None:
+    def _process_plan(self, project: Project, task: Task, run_log: RunLog, start: float) -> None:
         plan_file = run_log.run_dir / "plan.txt"
         self.state.update_run(project.project_id, run_log.run_id, status="PLANNING", currentLog=str(run_log.output_log))
         code = run_codex_to_file(project, plan_prompt(project, task), run_log, "agent.log", plan_file)
@@ -286,8 +291,9 @@ class Worker:
             plan_text = verification_failure_text(run_log.phase_log("agent.log"))
         if not plan_text:
             raise RuntimeError("plan agent produced no plan")
-        self.client.update(project.project_id, task.id, "PLAN REVIEW", reason=plan_text)
-        self.state.finish_run(project.project_id, run_log.run_id, status="PLAN REVIEW")
+        runtime = elapsed_runtime(start)
+        self.client.update(project.project_id, task.id, "PLAN REVIEW", reason=plan_text, runtime=runtime)
+        self.state.finish_run(project.project_id, run_log.run_id, status="PLAN REVIEW", runtime=runtime)
         print_event(project.project_id, f"task {task.id} PLAN REVIEW")
 
     def _process_implementation(self, project: Project, task: Task, run_log: RunLog, start: float) -> None:
@@ -313,9 +319,9 @@ class Worker:
 
         push(project.repo_path)
         sha = commit_sha(project.repo_path)
-        elapsed = int(time.monotonic() - start)
-        self.client.update(project.project_id, task.id, "VERIFY", sha=f"{sha} ({format_elapsed(elapsed)})")
-        self.state.finish_run(project.project_id, run_log.run_id, status="VERIFY", commitSha=sha)
+        runtime = elapsed_runtime(start)
+        self.client.update(project.project_id, task.id, "VERIFY", sha=sha, runtime=runtime)
+        self.state.finish_run(project.project_id, run_log.run_id, status="VERIFY", commitSha=sha, runtime=runtime)
         print_event(project.project_id, f"task {task.id} VERIFY {sha}")
 
     def _verify_with_fix_loop(self, project: Project, task: Task, run_log: RunLog, verify_log: Path) -> None:

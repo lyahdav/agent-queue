@@ -42,8 +42,13 @@ include TDD guidance.
 Create one task tab per project. Each task tab uses these headers:
 
 ```text
-ID,Status,Task,Commit SHAs,Redo Reason,Claimed At,Updated At,Last Error
+ID,Status,Task,Commit SHAs,Redo Reason,Claimed At,Updated At,Last Runtime,Last Error
 ```
+
+`Last Runtime` stores the most recent worker runtime from when the task was
+picked up until it reached `PLAN REVIEW`, `VERIFY`, or `FAILED`. If a task is
+run more than once, for example after setting it to `REDO`, this value is
+replaced by the latest run.
 
 Supported actionable statuses:
 

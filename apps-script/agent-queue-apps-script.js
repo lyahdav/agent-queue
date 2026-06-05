@@ -18,6 +18,7 @@ var TASK_HEADERS = [
   "redoReason",
   "claimedAt",
   "updatedAt",
+  "lastRuntime",
   "lastError"
 ];
 
@@ -171,6 +172,7 @@ function claimTask_(requestData) {
     sheet.getRange(rows[j]._row, 6).setValue(now);
     sheet.getRange(rows[j]._row, 7).setValue(now);
     sheet.getRange(rows[j]._row, 8).setValue("");
+    sheet.getRange(rows[j]._row, 9).setValue("");
     return { task: taskPayload_(rows[j], nextStatus, originalStatus, false) };
   }
 
@@ -193,7 +195,8 @@ function updateTask_(requestData) {
     }
     if (requestData.reason) sheet.getRange(rows[i]._row, 5).setValue(requestData.reason);
     sheet.getRange(rows[i]._row, 7).setValue(new Date());
-    if (requestData.lastError) sheet.getRange(rows[i]._row, 8).setValue(requestData.lastError);
+    if ("runtime" in requestData) sheet.getRange(rows[i]._row, 8).setValue(requestData.runtime || "");
+    if (requestData.lastError) sheet.getRange(rows[i]._row, 9).setValue(requestData.lastError);
     return { success: true };
   }
   return { error: "Task ID not found" };
@@ -208,7 +211,7 @@ function insertTasks_(requestData) {
   for (var i = 0; i < tasks.length; i++) {
     var task = tasks[i] || {};
     if (!task.task) continue;
-    sheet.appendRow(["", task.status || "READY", task.task, "", "", "", "", ""]);
+    sheet.appendRow(["", task.status || "READY", task.task, "", "", "", "", "", ""]);
     inserted += 1;
   }
   return { success: true, inserted: inserted };

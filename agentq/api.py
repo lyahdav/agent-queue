@@ -86,18 +86,20 @@ class QueueClient:
         sha: str = "",
         reason: str = "",
         last_error: str = "",
+        runtime: str = "",
     ) -> None:
-        data = self._post(
-            {
-                "action": "update",
-                "projectId": project_id,
-                "id": task_id,
-                "status": status,
-                "sha": sha,
-                "reason": reason,
-                "lastError": last_error,
-            }
-        )
+        payload = {
+            "action": "update",
+            "projectId": project_id,
+            "id": task_id,
+            "status": status,
+            "sha": sha,
+            "reason": reason,
+            "lastError": last_error,
+        }
+        if runtime:
+            payload["runtime"] = runtime
+        data = self._post(payload)
         if data.get("success") is not True:
             raise QueueError(f"queue update failed for task {task_id}")
 
