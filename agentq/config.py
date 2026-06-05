@@ -35,6 +35,15 @@ def web_app_url() -> str:
     return value
 
 
+def ca_bundle_path() -> str | None:
+    _load_env_file(CONFIG_ENV)
+    return (
+        os.environ.get("AGENTQ_CA_BUNDLE")
+        or os.environ.get("SSL_CERT_FILE")
+        or os.environ.get("REQUESTS_CA_BUNDLE")
+    )
+
+
 def ensure_app_dirs() -> None:
     APP_DIR.mkdir(parents=True, exist_ok=True)
     RUNS_DIR.mkdir(parents=True, exist_ok=True)

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
 
-from .config import web_app_url
+from .config import ca_bundle_path, web_app_url
 from .models import Project, Task
 
 
@@ -17,15 +18,16 @@ class QueueError(RuntimeError):
 class QueueClient:
     def __init__(self, url: str | None = None):
         self.url = url or web_app_url()
+        self.ssl_context = _ssl_context()
 
     def _get(self, params: dict[str, Any]) -> dict[str, Any]:
         query = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         url = f"{self.url}?{query}"
         try:
-            with urllib.request.urlopen(url, timeout=60) as response:
+            with urllib.request.urlopen(url, timeout=60, context=self.ssl_context) as response:
                 return self._decode(response.read())
         except urllib.error.URLError as exc:
-            raise QueueError(f"queue GET failed: {exc}") from exc
+            raise QueueError(_url_error_message("GET", exc)) from exc
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
@@ -36,10 +38,10 @@ class QueueClient:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=120) as response:
+            with urllib.request.urlopen(request, timeout=120, context=self.ssl_context) as response:
                 return self._decode(response.read())
         except urllib.error.URLError as exc:
-            raise QueueError(f"queue POST failed: {exc}") from exc
+            raise QueueError(_url_error_message("POST", exc)) from exc
 
     def _decode(self, body: bytes) -> dict[str, Any]:
         text = body.decode("utf-8", errors="replace")
@@ -108,3 +110,44 @@ class QueueClient:
         if data.get("success") is not True:
             raise QueueError("queue insert failed")
         return int(data.get("inserted") or 0)
+
+
+def _ssl_context() -> ssl.SSLContext:
+    bundle = ca_bundle_path()
+    if bundle:
+        try:
+            return ssl.create_default_context(cafile=bundle)
+        except OSError as exc:
+            raise RuntimeError(f"CA bundle path is not readable: {bundle}") from exc
+
+    paths = ssl.get_default_verify_paths()
+    if paths.cafile is None and paths.capath is None:
+        certifi_bundle = _certifi_bundle()
+        if certifi_bundle:
+            return ssl.create_default_context(cafile=certifi_bundle)
+
+    return ssl.create_default_context()
+
+
+def _certifi_bundle() -> str | None:
+    try:
+        import certifi  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    return certifi.where()
+
+
+def _url_error_message(method: str, exc: urllib.error.URLError) -> str:
+    message = f"queue {method} failed: {exc}"
+    if _is_certificate_verify_error(exc):
+        message += (
+            ". TLS certificate verification failed. Run Python's "
+            "Install Certificates.command on macOS, install certifi for this Python, "
+            "or set AGENTQ_CA_BUNDLE in ~/.agent-queue/config.env to a PEM CA bundle."
+        )
+    return message
+
+
+def _is_certificate_verify_error(exc: urllib.error.URLError) -> bool:
+    reason = getattr(exc, "reason", None)
+    return isinstance(reason, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(exc)

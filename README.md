@@ -79,6 +79,15 @@ printf 'AGENTQ_WEB_APP_URL="https://script.google.com/macros/s/.../exec"\n' > ~/
 
 `TODO_WEB_APP_URL` is also accepted for compatibility.
 
+If your Python install cannot find trusted root certificates, HTTPS calls may
+fail with `CERTIFICATE_VERIFY_FAILED`. On macOS Python.org installs, run the
+`Install Certificates.command` app for your Python version. You can also point
+`agentq` at a PEM CA bundle:
+
+```bash
+printf 'AGENTQ_CA_BUNDLE="/path/to/cacert.pem"\n' >> ~/.agent-queue/config.env
+```
+
 ## Usage
 
 From this repo:
