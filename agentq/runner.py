@@ -18,7 +18,7 @@ from .gitutils import (
     push,
     staged_diff,
 )
-from .logs import RunLog
+from .logs import RunLog, attach_command
 from .models import Project, Task
 from .process import run_args_to_logs, run_shell_to_logs
 from .state import StateStore, locked_file
@@ -271,7 +271,7 @@ class Worker:
             runDir=str(run_log.run_dir),
             outputLog=str(run_log.output_log),
         )
-        print_event(project.project_id, f"task {task.id} started; attach: agentq attach --run {run_log.run_id}")
+        print_event(project.project_id, f"task {task.id} started; attach: {attach_command(run_log.run_id)}")
         try:
             if task.original_status == "PLAN" or task.status == "PLAN IN PROGRESS":
                 self._process_plan(project, task, run_log, start)

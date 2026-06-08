@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from .api import QueueClient, QueueError
+from .logs import attach_command
 from .models import Project
 from .runner import Worker, print_event
 from .state import StateStore
@@ -98,7 +99,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"{project.project_id}: {enabled}, {status}, task {task_id}, run {run_id}")
         if output_log:
             print(f"  log: {output_log}")
-            print(f"  attach: agentq attach --run {run_id}")
+            print(f"  attach: {attach_command(run_id)}")
     return 0
 
 

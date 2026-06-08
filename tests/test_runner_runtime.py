@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+from io import StringIO
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -57,6 +59,28 @@ def make_project(repo_path="/tmp/demo"):
 
 
 class RunnerRuntimeTests(unittest.TestCase):
+    def test_process_task_prints_module_attach_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client = FakeClient()
+            state = FakeState()
+            worker = Worker(client, state)
+            task = Task(id="7", status="IN PROGRESS", task="Fix parser")
+            run_log = FakeRunLog(Path(tmp))
+            stdout = StringIO()
+
+            with (
+                patch("agentq.runner.RunLog", return_value=run_log),
+                patch.object(Worker, "_process_implementation"),
+                patch("agentq.runner.time.strftime", return_value="13:49:54"),
+                redirect_stdout(stdout),
+            ):
+                worker.process_task(make_project(), task)
+
+            self.assertIn(
+                "[13:49:54] demo: task 7 started; attach: python3 -m agentq attach --run run-1",
+                stdout.getvalue(),
+            )
+
     def test_fail_task_writes_runtime(self):
         with tempfile.TemporaryDirectory() as tmp:
             client = FakeClient()

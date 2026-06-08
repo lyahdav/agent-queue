@@ -14,6 +14,10 @@ def make_run_id(project_id: str, task_id: str) -> str:
     return f"{project_id}-{task_id}-{stamp}"
 
 
+def attach_command(run_id: str) -> str:
+    return f"python3 -m agentq attach --run {run_id}"
+
+
 class RunLog:
     def __init__(self, project: Project, task: Task):
         ensure_app_dirs()
