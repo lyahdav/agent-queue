@@ -14,8 +14,11 @@ def make_run_id(project_id: str, task_id: str) -> str:
     return f"{project_id}-{task_id}-{stamp}"
 
 
-def attach_command(run_id: str) -> str:
-    return f"python3 -m agentq attach --run {run_id}"
+def attach_command(run_id: str, *, all_logs: bool = False) -> str:
+    command = f"python3 -m agentq attach --run {run_id}"
+    if all_logs:
+        command += " --all"
+    return command
 
 
 class RunLog:

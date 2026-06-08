@@ -99,15 +99,16 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"{project.project_id}: {enabled}, {status}, task {task_id}, run {run_id}")
         if output_log:
             print(f"  log: {output_log}")
-            print(f"  attach: {attach_command(run_id)}")
+            print(f"  attach: {attach_command(run_id, all_logs=True)}")
     return 0
 
 
-def _tail_file(path: Path) -> int:
+def _tail_file(path: Path, *, all_logs: bool = False) -> int:
     if not path.exists():
         print(f"Log file does not exist yet: {path}", file=sys.stderr)
         return 1
-    return subprocess.call(["tail", "-n", "80", "-f", str(path)])
+    lines = "+1" if all_logs else "80"
+    return subprocess.call(["tail", "-n", lines, "-f", str(path)])
 
 
 def cmd_attach(args: argparse.Namespace) -> int:
@@ -130,7 +131,7 @@ def cmd_attach(args: argparse.Namespace) -> int:
     if not output_log:
         print("Selected run has no output log.", file=sys.stderr)
         return 1
-    return _tail_file(Path(output_log))
+    return _tail_file(Path(output_log), all_logs=args.all)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -159,6 +160,7 @@ def build_parser() -> argparse.ArgumentParser:
     group = attach.add_mutually_exclusive_group(required=True)
     group.add_argument("--project")
     group.add_argument("--run")
+    attach.add_argument("--all", action="store_true", help="show the entire output log before following")
     attach.set_defaults(func=cmd_attach)
 
     return parser

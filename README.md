@@ -98,6 +98,7 @@ python3 -m agentq watch
 python3 -m agentq worker --project my-project
 python3 -m agentq add --project my-project --task "Add a test for the parser"
 python3 -m agentq attach --project my-project
+python3 -m agentq attach --run my-project-1-20260608-134954 --all
 ```
 
 For convenience, you can add this directory to your `PATH` and use `bin/agentq`.
@@ -120,8 +121,11 @@ Each run contains:
 - `verify.log`
 - `fix-<n>.log`
 
-Use `agentq attach --project <projectId>` or `agentq attach --run <runId>` to
-follow one task's `output.log` without intermingled output from other projects.
+Use `python3 -m agentq attach --project <projectId>` or
+`python3 -m agentq attach --run <runId> --all` to follow one task's
+`output.log` without intermingled output from other projects. By default,
+`attach` starts with the last 80 lines; `--all` prints the whole prior log
+before following new output.
 
 ## Safety Defaults
 

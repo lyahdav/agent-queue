@@ -3,15 +3,16 @@ from contextlib import redirect_stdout
 from io import StringIO
 from unittest.mock import patch
 
-from agentq.cli import build_parser, cmd_status
+from agentq.cli import build_parser, cmd_attach, cmd_status
 from agentq.models import Project
 
 
 class CliTests(unittest.TestCase):
     def test_attach_requires_project_or_run(self):
         parser = build_parser()
-        args = parser.parse_args(["attach", "--run", "abc"])
+        args = parser.parse_args(["attach", "--run", "abc", "--all"])
         self.assertEqual(args.run, "abc")
+        self.assertTrue(args.all)
 
     def test_worker_project_argument(self):
         parser = build_parser()
@@ -53,7 +54,28 @@ class CliTests(unittest.TestCase):
             result = cmd_status(build_parser().parse_args(["status"]))
 
         self.assertEqual(result, 0)
-        self.assertIn("attach: python3 -m agentq attach --run demo-7-20260608-134954", stdout.getvalue())
+        self.assertIn("attach: python3 -m agentq attach --run demo-7-20260608-134954 --all", stdout.getvalue())
+
+    def test_attach_all_tails_from_start(self):
+        state = {
+            "active": {},
+            "runs": {
+                "demo-7-20260608-134954": {
+                    "outputLog": "/tmp/output.log",
+                }
+            },
+        }
+
+        with (
+            patch("agentq.cli.StateStore") as state_cls,
+            patch("agentq.cli.Path.exists", return_value=True),
+            patch("agentq.cli.subprocess.call", return_value=0) as call,
+        ):
+            state_cls.return_value.run.return_value = state["runs"]["demo-7-20260608-134954"]
+            result = cmd_attach(build_parser().parse_args(["attach", "--run", "demo-7-20260608-134954", "--all"]))
+
+        self.assertEqual(result, 0)
+        call.assert_called_once_with(["tail", "-n", "+1", "-f", "/tmp/output.log"])
 
 
 if __name__ == "__main__":

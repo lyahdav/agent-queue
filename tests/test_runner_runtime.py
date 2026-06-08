@@ -77,7 +77,7 @@ class RunnerRuntimeTests(unittest.TestCase):
                 worker.process_task(make_project(), task)
 
             self.assertIn(
-                "[13:49:54] demo: task 7 started; attach: python3 -m agentq attach --run run-1",
+                "[13:49:54] demo: task 7 started; attach: python3 -m agentq attach --run run-1 --all",
                 stdout.getvalue(),
             )
 
