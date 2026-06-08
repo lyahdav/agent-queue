@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import html
 import json
+import re
 import ssl
 import time
 import urllib.error
@@ -41,6 +43,7 @@ class QueueClient:
         raise QueueError("queue GET failed")
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+        operation = _payload_operation(payload)
         body = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             self.url,
@@ -52,9 +55,9 @@ class QueueClient:
             with urllib.request.urlopen(request, timeout=120, context=self.ssl_context) as response:
                 return self._decode(response.read())
         except urllib.error.HTTPError as exc:
-            raise QueueError(_url_error_message("POST", exc)) from exc
+            raise QueueError(_url_error_message("POST", exc, operation)) from exc
         except urllib.error.URLError as exc:
-            raise QueueError(_url_error_message("POST", exc)) from exc
+            raise QueueError(_url_error_message("POST", exc, operation)) from exc
 
     def _decode(self, body: bytes) -> dict[str, Any]:
         text = body.decode("utf-8", errors="replace")
@@ -150,14 +153,16 @@ def _certifi_bundle() -> str | None:
     return certifi.where()
 
 
-def _url_error_message(method: str, exc: urllib.error.URLError) -> str:
+def _url_error_message(method: str, exc: urllib.error.URLError, operation: str = "") -> str:
     if isinstance(exc, urllib.error.HTTPError):
         message = f"queue {method} failed: HTTP {exc.code} {exc.reason}"
-        body = _http_error_body_preview(exc)
+        body = _http_error_body(exc)
         if body:
             message += f": {body}"
     else:
         message = f"queue {method} failed: {exc}"
+    if operation:
+        message += f" ({operation})"
     if _is_certificate_verify_error(exc):
         message += (
             ". TLS certificate verification failed. Run Python's "
@@ -167,12 +172,43 @@ def _url_error_message(method: str, exc: urllib.error.URLError) -> str:
     return message
 
 
-def _http_error_body_preview(exc: urllib.error.HTTPError) -> str:
+def _payload_operation(payload: dict[str, Any]) -> str:
+    parts = []
+    action = payload.get("action")
+    if action:
+        parts.append(str(action))
+    project_id = payload.get("projectId")
+    if project_id:
+        parts.append(f"project={project_id}")
+    task_id = payload.get("id")
+    if task_id:
+        parts.append(f"task={task_id}")
+    status = payload.get("status")
+    if status:
+        parts.append(f"status={status}")
+    if payload.get("resumeOnly"):
+        parts.append("resumeOnly=true")
+    return " ".join(parts)
+
+
+def _http_error_body(exc: urllib.error.HTTPError) -> str:
     try:
         text = exc.read().decode("utf-8", errors="replace")
     except OSError:
         return ""
-    return " ".join(text.split())[:500]
+    return _clean_response_text(text)
+
+
+def _clean_response_text(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return ""
+    if "<" not in stripped or ">" not in stripped:
+        return " ".join(stripped.split())
+    without_scripts = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", stripped)
+    without_tags = re.sub(r"(?s)<[^>]+>", " ", without_scripts)
+    cleaned = html.unescape(without_tags)
+    return " ".join(cleaned.split())
 
 
 def _is_retryable_http_error(exc: urllib.error.HTTPError) -> bool:

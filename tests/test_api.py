@@ -96,6 +96,77 @@ class QueueClientTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 2)
         sleep.assert_called_once_with(1)
 
+    def test_post_errors_do_not_retry_transient_http_errors(self):
+        client = QueueClient("https://example.test/queue")
+
+        with patch(
+            "agentq.api.urllib.request.urlopen",
+            side_effect=http_error(500, "Internal Server Error", b"temporary"),
+        ) as urlopen:
+            with patch("agentq.api.time.sleep") as sleep:
+                with self.assertRaises(QueueError):
+                    client.claim("demo", "worker-1")
+
+        self.assertEqual(urlopen.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_insert_does_not_retry_transient_http_errors(self):
+        client = QueueClient("https://example.test/queue")
+
+        with patch(
+            "agentq.api.urllib.request.urlopen",
+            side_effect=http_error(500, "Internal Server Error", b"temporary"),
+        ) as urlopen:
+            with patch("agentq.api.time.sleep") as sleep:
+                with self.assertRaises(QueueError):
+                    client.insert("demo", [{"task": "do it"}])
+
+        self.assertEqual(urlopen.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_post_errors_include_payload_operation(self):
+        client = QueueClient("https://example.test/queue")
+
+        with patch(
+            "agentq.api.urllib.request.urlopen",
+            side_effect=http_error(500, "Internal Server Error", b"temporary"),
+        ):
+            with patch("agentq.api.time.sleep"):
+                with self.assertRaises(QueueError) as raised:
+                    client.update("demo", "7", "VERIFY", sha="abc123")
+
+        message = str(raised.exception)
+        self.assertIn("update project=demo task=7 status=VERIFY", message)
+
+    def test_http_errors_extract_full_html_text(self):
+        client = QueueClient("https://example.test/queue")
+        body = b"""
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <title>Error</title>
+                <style>.errorMessage { font-weight: bold; }</style>
+              </head>
+              <body>
+                <div><img alt="Google Apps Script"></div>
+                <div class="errorMessage">
+                  Exception: This is the important Apps Script failure,
+                  including the later part that used to be cut off.
+                </div>
+              </body>
+            </html>
+        """
+
+        with patch("agentq.api.urllib.request.urlopen", side_effect=http_error(500, "Internal Server Error", body)):
+            with patch("agentq.api.time.sleep"):
+                with self.assertRaises(QueueError) as raised:
+                    client.list_projects()
+
+        message = str(raised.exception)
+        self.assertIn("Error Exception: This is the important Apps Script failure", message)
+        self.assertIn("including the later part that used to be cut off", message)
+        self.assertNotIn("font-weight", message)
+
 
 if __name__ == "__main__":
     unittest.main()
