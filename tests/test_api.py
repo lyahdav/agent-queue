@@ -96,7 +96,24 @@ class QueueClientTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 2)
         sleep.assert_called_once_with(1)
 
-    def test_post_errors_do_not_retry_transient_http_errors(self):
+    def test_claim_retries_transient_http_errors(self):
+        client = QueueClient("https://example.test/queue")
+
+        with patch(
+            "agentq.api.urllib.request.urlopen",
+            side_effect=[
+                http_error(500, "Internal Server Error", b"temporary"),
+                Response(b'{"task": null}'),
+            ],
+        ) as urlopen:
+            with patch("agentq.api.time.sleep") as sleep:
+                task = client.claim("demo", "worker-1")
+
+        self.assertIsNone(task)
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
+
+    def test_update_does_not_retry_transient_http_errors(self):
         client = QueueClient("https://example.test/queue")
 
         with patch(
@@ -105,7 +122,7 @@ class QueueClientTests(unittest.TestCase):
         ) as urlopen:
             with patch("agentq.api.time.sleep") as sleep:
                 with self.assertRaises(QueueError):
-                    client.claim("demo", "worker-1")
+                    client.update("demo", "7", "VERIFY", sha="abc123")
 
         self.assertEqual(urlopen.call_count, 1)
         sleep.assert_not_called()

@@ -1,9 +1,10 @@
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from unittest.mock import patch
 
-from agentq.cli import build_parser, cmd_attach, cmd_status
+from agentq.api import QueueError
+from agentq.cli import build_parser, cmd_attach, cmd_status, main
 from agentq.models import Project
 
 
@@ -76,6 +77,19 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         call.assert_called_once_with(["tail", "-n", "+1", "-f", "/tmp/output.log"])
+
+    def test_main_timestamps_queue_errors(self):
+        stderr = StringIO()
+
+        with (
+            patch("agentq.cli.QueueClient", side_effect=QueueError("boom")),
+            patch("agentq.cli.time.strftime", return_value="14:09:31"),
+            redirect_stderr(stderr),
+        ):
+            result = main(["status"])
+
+        self.assertEqual(result, 1)
+        self.assertEqual(stderr.getvalue(), "[14:09:31] queue error: boom\n")
 
 
 if __name__ == "__main__":

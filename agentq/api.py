@@ -19,6 +19,7 @@ class QueueError(RuntimeError):
 
 
 GET_RETRY_DELAYS = (1, 2, 4)
+CLAIM_RETRY_DELAYS = (1, 2, 4)
 
 
 class QueueClient:
@@ -42,7 +43,7 @@ class QueueClient:
                 raise QueueError(_url_error_message("GET", exc)) from exc
         raise QueueError("queue GET failed")
 
-    def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post(self, payload: dict[str, Any], *, retry_transient: bool = False) -> dict[str, Any]:
         operation = _payload_operation(payload)
         body = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
@@ -51,13 +52,19 @@ class QueueClient:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=120, context=self.ssl_context) as response:
-                return self._decode(response.read())
-        except urllib.error.HTTPError as exc:
-            raise QueueError(_url_error_message("POST", exc, operation)) from exc
-        except urllib.error.URLError as exc:
-            raise QueueError(_url_error_message("POST", exc, operation)) from exc
+        retry_delays = CLAIM_RETRY_DELAYS if retry_transient else ()
+        for attempt in range(len(retry_delays) + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=120, context=self.ssl_context) as response:
+                    return self._decode(response.read())
+            except urllib.error.HTTPError as exc:
+                if _is_retryable_http_error(exc) and attempt < len(retry_delays):
+                    time.sleep(retry_delays[attempt])
+                    continue
+                raise QueueError(_url_error_message("POST", exc, operation)) from exc
+            except urllib.error.URLError as exc:
+                raise QueueError(_url_error_message("POST", exc, operation)) from exc
+        raise QueueError(f"queue POST failed ({operation})")
 
     def _decode(self, body: bytes) -> dict[str, Any]:
         text = body.decode("utf-8", errors="replace")
@@ -89,7 +96,8 @@ class QueueClient:
                 "projectId": project_id,
                 "workerId": worker_id,
                 "resumeOnly": resume_only,
-            }
+            },
+            retry_transient=True,
         )
         task = data.get("task")
         if not task:

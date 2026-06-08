@@ -13,6 +13,10 @@ from .runner import Worker, print_event
 from .state import StateStore
 
 
+def print_error(message: str) -> None:
+    print(f"[{time.strftime('%H:%M:%S')}] {message}", file=sys.stderr, flush=True)
+
+
 def cmd_worker(args: argparse.Namespace) -> int:
     client = QueueClient()
     return Worker(client).run(args.project, forever=args.forever)
@@ -54,7 +58,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
                 proc.kill()
         return 0
     except QueueError as exc:
-        print(f"agentq watch error: {exc}", file=sys.stderr)
+        print_error(f"agentq watch error: {exc}")
         return 1
 
 
@@ -172,8 +176,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(args.func(args))
     except QueueError as exc:
-        print(f"queue error: {exc}", file=sys.stderr)
+        print_error(f"queue error: {exc}")
         return 1
     except RuntimeError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print_error(f"error: {exc}")
         return 1
