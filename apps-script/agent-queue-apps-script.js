@@ -23,7 +23,7 @@ var TASK_HEADERS = [
 ];
 
 function doGet(e) {
-  return withLock_(function () {
+  return safely_(function () {
     var action = param_(e, "action") || "projects";
     if (action === "projects") {
       return json_({ projects: listProjects_() });
@@ -33,24 +33,40 @@ function doGet(e) {
 }
 
 function doPost(e) {
-  return withLock_(function () {
-    var requestData = JSON.parse(e.postData.contents || "{}");
-    var action = requestData.action;
-    if (action === "claim") return json_(claimTask_(requestData));
-    if (action === "update") return json_(updateTask_(requestData));
-    if (action === "insert") return json_(insertTasks_(requestData));
-    return json_({ error: "Unknown POST action: " + action });
+  return safely_(function () {
+    return withLock_(function () {
+      var requestData = JSON.parse(e.postData.contents || "{}");
+      var action = requestData.action;
+      if (action === "claim") return json_(claimTask_(requestData));
+      if (action === "update") return json_(updateTask_(requestData));
+      if (action === "insert") return json_(insertTasks_(requestData));
+      return json_({ error: "Unknown POST action: " + action });
+    });
   });
+}
+
+function safely_(fn) {
+  try {
+    return fn();
+  } catch (err) {
+    return json_({ error: errorMessage_(err) });
+  }
 }
 
 function withLock_(fn) {
   var lock = LockService.getScriptLock();
-  lock.waitLock(10000);
+  var locked = false;
   try {
+    lock.waitLock(30000);
+    locked = true;
     return fn();
   } finally {
-    lock.releaseLock();
+    if (locked) lock.releaseLock();
   }
+}
+
+function errorMessage_(err) {
+  return err && err.message ? err.message : String(err);
 }
 
 function json_(value) {

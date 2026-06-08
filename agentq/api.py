@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,6 +16,9 @@ class QueueError(RuntimeError):
     pass
 
 
+GET_RETRY_DELAYS = (1, 2, 4)
+
+
 class QueueClient:
     def __init__(self, url: str | None = None):
         self.url = url or web_app_url()
@@ -23,11 +27,18 @@ class QueueClient:
     def _get(self, params: dict[str, Any]) -> dict[str, Any]:
         query = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         url = f"{self.url}?{query}"
-        try:
-            with urllib.request.urlopen(url, timeout=60, context=self.ssl_context) as response:
-                return self._decode(response.read())
-        except urllib.error.URLError as exc:
-            raise QueueError(_url_error_message("GET", exc)) from exc
+        for attempt in range(len(GET_RETRY_DELAYS) + 1):
+            try:
+                with urllib.request.urlopen(url, timeout=60, context=self.ssl_context) as response:
+                    return self._decode(response.read())
+            except urllib.error.HTTPError as exc:
+                if _is_retryable_http_error(exc) and attempt < len(GET_RETRY_DELAYS):
+                    time.sleep(GET_RETRY_DELAYS[attempt])
+                    continue
+                raise QueueError(_url_error_message("GET", exc)) from exc
+            except urllib.error.URLError as exc:
+                raise QueueError(_url_error_message("GET", exc)) from exc
+        raise QueueError("queue GET failed")
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
@@ -40,6 +51,8 @@ class QueueClient:
         try:
             with urllib.request.urlopen(request, timeout=120, context=self.ssl_context) as response:
                 return self._decode(response.read())
+        except urllib.error.HTTPError as exc:
+            raise QueueError(_url_error_message("POST", exc)) from exc
         except urllib.error.URLError as exc:
             raise QueueError(_url_error_message("POST", exc)) from exc
 
@@ -138,7 +151,13 @@ def _certifi_bundle() -> str | None:
 
 
 def _url_error_message(method: str, exc: urllib.error.URLError) -> str:
-    message = f"queue {method} failed: {exc}"
+    if isinstance(exc, urllib.error.HTTPError):
+        message = f"queue {method} failed: HTTP {exc.code} {exc.reason}"
+        body = _http_error_body_preview(exc)
+        if body:
+            message += f": {body}"
+    else:
+        message = f"queue {method} failed: {exc}"
     if _is_certificate_verify_error(exc):
         message += (
             ". TLS certificate verification failed. Run Python's "
@@ -146,6 +165,18 @@ def _url_error_message(method: str, exc: urllib.error.URLError) -> str:
             "or set AGENTQ_CA_BUNDLE in ~/.agent-queue/config.env to a PEM CA bundle."
         )
     return message
+
+
+def _http_error_body_preview(exc: urllib.error.HTTPError) -> str:
+    try:
+        text = exc.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+    return " ".join(text.split())[:500]
+
+
+def _is_retryable_http_error(exc: urllib.error.HTTPError) -> bool:
+    return exc.code in {500, 502, 503, 504}
 
 
 def _is_certificate_verify_error(exc: urllib.error.URLError) -> bool:
