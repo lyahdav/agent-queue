@@ -25,6 +25,7 @@ from .state import StateStore, locked_file
 
 
 MAX_FIX_RETRIES = 10
+DEFAULT_QUEUE_RETRY_SECONDS = 30
 
 
 def worker_id(project_id: str) -> str:
@@ -212,26 +213,49 @@ class Worker:
 
     def _run_locked(self, project_id: str, forever: bool) -> int:
         wid = worker_id(project_id)
+        poll_seconds = DEFAULT_QUEUE_RETRY_SECONDS
         while True:
-            project = self.client.get_project(project_id)
+            try:
+                project = self.client.get_project(project_id)
+            except QueueError as exc:
+                if not forever:
+                    raise
+                print_event(project_id, f"queue unavailable; retrying in {poll_seconds}s: {exc}")
+                time.sleep(poll_seconds)
+                continue
             if project is None:
                 print_event(project_id, "project not found")
                 return 1
             if not project.enabled:
                 print_event(project_id, "disabled; worker idle")
                 return 0
+            poll_seconds = project.poll_seconds
 
-            task = self._claim_when_safe(project, wid)
+            try:
+                task = self._claim_when_safe(project, wid)
+            except QueueError as exc:
+                if not forever:
+                    raise
+                print_event(project_id, f"queue unavailable; retrying in {poll_seconds}s: {exc}")
+                time.sleep(poll_seconds)
+                continue
             if task is None:
                 if not forever:
                     print_event(project_id, "no task claimed")
                     return 0
-                time.sleep(project.poll_seconds)
+                time.sleep(poll_seconds)
                 continue
 
             self.process_task(project, task)
 
-            refreshed = self.client.get_project(project_id)
+            try:
+                refreshed = self.client.get_project(project_id)
+            except QueueError as exc:
+                if not forever:
+                    raise
+                print_event(project_id, f"queue unavailable; retrying in {poll_seconds}s: {exc}")
+                time.sleep(poll_seconds)
+                continue
             if refreshed is None or not refreshed.enabled:
                 print_event(project_id, "disabled after task; stopping")
                 return 0

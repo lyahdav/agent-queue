@@ -35,11 +35,16 @@ def cmd_watch(args: argparse.Namespace) -> int:
     print("agentq watch started", flush=True)
     try:
         while True:
-            projects = {project.project_id: project for project in client.list_projects()}
             for project_id, proc in list(workers.items()):
                 if proc.poll() is not None:
                     workers.pop(project_id, None)
                     print_event(project_id, f"worker exited with code {proc.returncode}")
+            try:
+                projects = {project.project_id: project for project in client.list_projects()}
+            except QueueError as exc:
+                print_error(f"agentq watch queue unavailable; retrying in {args.poll_seconds}s: {exc}")
+                time.sleep(args.poll_seconds)
+                continue
             for project in projects.values():
                 if not project.enabled:
                     continue
@@ -57,9 +62,6 @@ def cmd_watch(args: argparse.Namespace) -> int:
             except subprocess.TimeoutExpired:
                 proc.kill()
         return 0
-    except QueueError as exc:
-        print_error(f"agentq watch error: {exc}")
-        return 1
 
 
 def cmd_add(args: argparse.Namespace) -> int:

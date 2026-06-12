@@ -4,7 +4,7 @@ from io import StringIO
 from unittest.mock import patch
 
 from agentq.api import QueueError
-from agentq.cli import build_parser, cmd_attach, cmd_status, main
+from agentq.cli import build_parser, cmd_attach, cmd_status, cmd_watch, main
 from agentq.models import Project
 
 
@@ -90,6 +90,26 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(result, 1)
         self.assertEqual(stderr.getvalue(), "[14:09:31] queue error: boom\n")
+
+    def test_watch_retries_queue_errors(self):
+        stderr = StringIO()
+        stdout = StringIO()
+
+        with (
+            patch("agentq.cli.QueueClient") as client_cls,
+            patch("agentq.cli.time.sleep") as sleep,
+            patch("agentq.cli.time.strftime", return_value="14:09:31"),
+            redirect_stderr(stderr),
+            redirect_stdout(stdout),
+        ):
+            client_cls.return_value.list_projects.side_effect = [QueueError("offline"), KeyboardInterrupt()]
+            result = cmd_watch(build_parser().parse_args(["watch", "--poll-seconds", "5"]))
+
+        self.assertEqual(result, 0)
+        self.assertEqual(client_cls.return_value.list_projects.call_count, 2)
+        sleep.assert_called_once_with(5)
+        self.assertIn("[14:09:31] agentq watch queue unavailable; retrying in 5s: offline", stderr.getvalue())
+        self.assertIn("agentq watch stopping", stdout.getvalue())
 
 
 if __name__ == "__main__":

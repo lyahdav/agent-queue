@@ -5,6 +5,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from agentq.api import QueueError
 from agentq.models import Project, Task
 from agentq.runner import Worker, fail_task
 
@@ -44,6 +45,26 @@ class FakeState:
         self.finishes.append((args, kwargs))
 
 
+class FlakyProjectClient:
+    def __init__(self, project):
+        self.project = project
+        self.get_project_calls = 0
+
+    def get_project(self, project_id):
+        self.get_project_calls += 1
+        if self.get_project_calls == 1:
+            raise QueueError("offline")
+        return self.project if self.project.project_id == project_id else None
+
+    def claim(self, *_args, **_kwargs):
+        return None
+
+
+class FailingProjectClient:
+    def get_project(self, _project_id):
+        raise QueueError("offline")
+
+
 def make_project(repo_path="/tmp/demo"):
     return Project(
         project_id="demo",
@@ -58,7 +79,45 @@ def make_project(repo_path="/tmp/demo"):
     )
 
 
+def make_disabled_project():
+    project = make_project()
+    return Project(
+        project_id=project.project_id,
+        enabled=False,
+        sheet_name=project.sheet_name,
+        repo_path=project.repo_path,
+        default_branch=project.default_branch,
+        agent=project.agent,
+        use_tdd=project.use_tdd,
+        verify_command=project.verify_command,
+        poll_seconds=project.poll_seconds,
+    )
+
+
 class RunnerRuntimeTests(unittest.TestCase):
+    def test_forever_worker_retries_queue_errors(self):
+        client = FlakyProjectClient(make_disabled_project())
+        worker = Worker(client, FakeState())
+        stdout = StringIO()
+
+        with (
+            patch("agentq.runner.time.sleep") as sleep,
+            patch("agentq.runner.time.strftime", return_value="13:49:54"),
+            redirect_stdout(stdout),
+        ):
+            result = worker._run_locked("demo", forever=True)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(client.get_project_calls, 2)
+        sleep.assert_called_once_with(30)
+        self.assertIn("[13:49:54] demo: queue unavailable; retrying in 30s: offline", stdout.getvalue())
+
+    def test_non_forever_worker_surfaces_queue_errors(self):
+        worker = Worker(FailingProjectClient(), FakeState())
+
+        with self.assertRaises(QueueError):
+            worker._run_locked("demo", forever=False)
+
     def test_process_task_prints_module_attach_command(self):
         with tempfile.TemporaryDirectory() as tmp:
             client = FakeClient()

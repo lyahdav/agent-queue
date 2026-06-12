@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import socket
 import ssl
 import time
 import urllib.error
@@ -39,7 +40,10 @@ class QueueClient:
                     time.sleep(GET_RETRY_DELAYS[attempt])
                     continue
                 raise QueueError(_url_error_message("GET", exc)) from exc
-            except urllib.error.URLError as exc:
+            except (urllib.error.URLError, OSError, TimeoutError, ssl.SSLError) as exc:
+                if _is_retryable_transport_error(exc) and attempt < len(GET_RETRY_DELAYS):
+                    time.sleep(GET_RETRY_DELAYS[attempt])
+                    continue
                 raise QueueError(_url_error_message("GET", exc)) from exc
         raise QueueError("queue GET failed")
 
@@ -62,7 +66,10 @@ class QueueClient:
                     time.sleep(retry_delays[attempt])
                     continue
                 raise QueueError(_url_error_message("POST", exc, operation)) from exc
-            except urllib.error.URLError as exc:
+            except (urllib.error.URLError, OSError, TimeoutError, ssl.SSLError) as exc:
+                if _is_retryable_transport_error(exc) and attempt < len(retry_delays):
+                    time.sleep(retry_delays[attempt])
+                    continue
                 raise QueueError(_url_error_message("POST", exc, operation)) from exc
         raise QueueError(f"queue POST failed ({operation})")
 
@@ -161,7 +168,7 @@ def _certifi_bundle() -> str | None:
     return certifi.where()
 
 
-def _url_error_message(method: str, exc: urllib.error.URLError, operation: str = "") -> str:
+def _url_error_message(method: str, exc: BaseException, operation: str = "") -> str:
     if isinstance(exc, urllib.error.HTTPError):
         message = f"queue {method} failed: HTTP {exc.code} {exc.reason}"
         body = _http_error_body(exc)
@@ -223,6 +230,50 @@ def _is_retryable_http_error(exc: urllib.error.HTTPError) -> bool:
     return exc.code in {500, 502, 503, 504}
 
 
-def _is_certificate_verify_error(exc: urllib.error.URLError) -> bool:
+def _is_retryable_transport_error(exc: BaseException) -> bool:
+    if _is_certificate_verify_error(exc):
+        return False
+    if isinstance(exc, urllib.error.URLError):
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, BaseException):
+            return _is_retryable_transport_error(reason)
+    if isinstance(
+        exc,
+        (
+            TimeoutError,
+            ConnectionResetError,
+            ConnectionAbortedError,
+            ConnectionRefusedError,
+            BrokenPipeError,
+            socket.timeout,
+        ),
+    ):
+        return True
+    if isinstance(exc, ssl.SSLError):
+        return _looks_like_transient_transport_error(str(exc))
+    return _looks_like_transient_transport_error(str(exc))
+
+
+def _looks_like_transient_transport_error(message: str) -> bool:
+    text = message.lower()
+    return any(
+        phrase in text
+        for phrase in (
+            "timed out",
+            "timeout",
+            "connection reset",
+            "connection aborted",
+            "connection refused",
+            "broken pipe",
+            "handshake operation timed out",
+        )
+    )
+
+
+def _is_certificate_verify_error(exc: BaseException) -> bool:
     reason = getattr(exc, "reason", None)
-    return isinstance(reason, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(exc)
+    return (
+        isinstance(exc, ssl.SSLCertVerificationError)
+        or isinstance(reason, ssl.SSLCertVerificationError)
+        or "CERTIFICATE_VERIFY_FAILED" in str(exc)
+    )

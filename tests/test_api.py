@@ -1,4 +1,5 @@
 import io
+import ssl
 import unittest
 import urllib.error
 from unittest.mock import patch
@@ -59,12 +60,15 @@ class QueueClientTests(unittest.TestCase):
         client = QueueClient("https://example.test/queue")
         error = urllib.error.URLError("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed")
 
-        with patch("agentq.api.urllib.request.urlopen", side_effect=error):
-            with self.assertRaises(QueueError) as raised:
-                client.list_projects()
+        with patch("agentq.api.urllib.request.urlopen", side_effect=error) as urlopen:
+            with patch("agentq.api.time.sleep") as sleep:
+                with self.assertRaises(QueueError) as raised:
+                    client.list_projects()
 
         self.assertIn("TLS certificate verification failed", str(raised.exception))
         self.assertIn("AGENTQ_CA_BUNDLE", str(raised.exception))
+        self.assertEqual(urlopen.call_count, 1)
+        sleep.assert_not_called()
 
     def test_http_errors_include_response_body(self):
         client = QueueClient("https://example.test/queue")
@@ -96,6 +100,40 @@ class QueueClientTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 2)
         sleep.assert_called_once_with(1)
 
+    def test_get_retries_raw_connection_reset(self):
+        client = QueueClient("https://example.test/queue")
+
+        with patch(
+            "agentq.api.urllib.request.urlopen",
+            side_effect=[
+                ConnectionResetError("Connection reset by peer"),
+                Response(b'{"projects": []}'),
+            ],
+        ) as urlopen:
+            with patch("agentq.api.time.sleep") as sleep:
+                projects = client.list_projects()
+
+        self.assertEqual(projects, [])
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
+
+    def test_get_retries_ssl_handshake_timeout(self):
+        client = QueueClient("https://example.test/queue")
+
+        with patch(
+            "agentq.api.urllib.request.urlopen",
+            side_effect=[
+                ssl.SSLError("_ssl.c:1015: The handshake operation timed out"),
+                Response(b'{"projects": []}'),
+            ],
+        ) as urlopen:
+            with patch("agentq.api.time.sleep") as sleep:
+                projects = client.list_projects()
+
+        self.assertEqual(projects, [])
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
+
     def test_claim_retries_transient_http_errors(self):
         client = QueueClient("https://example.test/queue")
 
@@ -113,12 +151,43 @@ class QueueClientTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 2)
         sleep.assert_called_once_with(1)
 
+    def test_claim_retries_transient_transport_errors(self):
+        client = QueueClient("https://example.test/queue")
+
+        with patch(
+            "agentq.api.urllib.request.urlopen",
+            side_effect=[
+                TimeoutError("The handshake operation timed out"),
+                Response(b'{"task": null}'),
+            ],
+        ) as urlopen:
+            with patch("agentq.api.time.sleep") as sleep:
+                task = client.claim("demo", "worker-1")
+
+        self.assertIsNone(task)
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
+
     def test_update_does_not_retry_transient_http_errors(self):
         client = QueueClient("https://example.test/queue")
 
         with patch(
             "agentq.api.urllib.request.urlopen",
             side_effect=http_error(500, "Internal Server Error", b"temporary"),
+        ) as urlopen:
+            with patch("agentq.api.time.sleep") as sleep:
+                with self.assertRaises(QueueError):
+                    client.update("demo", "7", "VERIFY", sha="abc123")
+
+        self.assertEqual(urlopen.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_update_does_not_retry_transient_transport_errors(self):
+        client = QueueClient("https://example.test/queue")
+
+        with patch(
+            "agentq.api.urllib.request.urlopen",
+            side_effect=ConnectionResetError("Connection reset by peer"),
         ) as urlopen:
             with patch("agentq.api.time.sleep") as sleep:
                 with self.assertRaises(QueueError):
