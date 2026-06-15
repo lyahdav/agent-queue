@@ -18,7 +18,7 @@ from .gitutils import (
     push,
     staged_diff,
 )
-from .logs import RunLog, attach_command
+from .logs import RunLog, attach_command, format_log_timestamp
 from .models import Project, Task
 from .process import run_args_to_logs, run_shell_to_logs
 from .state import StateStore, locked_file
@@ -47,7 +47,7 @@ def elapsed_runtime(start: float) -> str:
 
 
 def print_event(project_id: str, message: str) -> None:
-    print(f"[{time.strftime('%H:%M:%S')}] {project_id}: {message}", flush=True)
+    print(f"[{format_log_timestamp()}] {project_id}: {message}", flush=True)
 
 
 def codex_base_args(repo: str, sandbox: str) -> list[str]:

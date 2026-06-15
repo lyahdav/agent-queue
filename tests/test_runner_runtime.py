@@ -102,7 +102,7 @@ class RunnerRuntimeTests(unittest.TestCase):
 
         with (
             patch("agentq.runner.time.sleep") as sleep,
-            patch("agentq.runner.time.strftime", return_value="13:49:54"),
+            patch("agentq.runner.format_log_timestamp", return_value="2026-06-15 01:49:54 PM"),
             redirect_stdout(stdout),
         ):
             result = worker._run_locked("demo", forever=True)
@@ -110,7 +110,7 @@ class RunnerRuntimeTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(client.get_project_calls, 2)
         sleep.assert_called_once_with(30)
-        self.assertIn("[13:49:54] demo: queue unavailable; retrying in 30s: offline", stdout.getvalue())
+        self.assertIn("[2026-06-15 01:49:54 PM] demo: queue unavailable; retrying in 30s: offline", stdout.getvalue())
 
     def test_non_forever_worker_surfaces_queue_errors(self):
         worker = Worker(FailingProjectClient(), FakeState())
@@ -130,13 +130,13 @@ class RunnerRuntimeTests(unittest.TestCase):
             with (
                 patch("agentq.runner.RunLog", return_value=run_log),
                 patch.object(Worker, "_process_implementation"),
-                patch("agentq.runner.time.strftime", return_value="13:49:54"),
+                patch("agentq.runner.format_log_timestamp", return_value="2026-06-15 01:49:54 PM"),
                 redirect_stdout(stdout),
             ):
                 worker.process_task(make_project(), task)
 
             self.assertIn(
-                "[13:49:54] demo: task 7 started; attach: python3 -m agentq attach --run run-1 --all",
+                "[2026-06-15 01:49:54 PM] demo: task 7 started; attach: python3 -m agentq attach --run run-1 --all",
                 stdout.getvalue(),
             )
 

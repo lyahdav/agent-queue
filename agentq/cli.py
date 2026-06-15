@@ -7,14 +7,14 @@ import time
 from pathlib import Path
 
 from .api import QueueClient, QueueError
-from .logs import attach_command
+from .logs import attach_command, format_log_timestamp
 from .models import Project
 from .runner import Worker, print_event
 from .state import StateStore
 
 
 def print_error(message: str) -> None:
-    print(f"[{time.strftime('%H:%M:%S')}] {message}", file=sys.stderr, flush=True)
+    print(f"[{format_log_timestamp()}] {message}", file=sys.stderr, flush=True)
 
 
 def cmd_worker(args: argparse.Namespace) -> int:

@@ -9,6 +9,10 @@ from .models import Project, Task
 from .state import append_jsonl
 
 
+def format_log_timestamp() -> str:
+    return time.strftime("%Y-%m-%d %I:%M:%S %p")
+
+
 def make_run_id(project_id: str, task_id: str) -> str:
     stamp = time.strftime("%Y%m%d-%H%M%S")
     return f"{project_id}-{task_id}-{stamp}"
