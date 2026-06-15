@@ -217,7 +217,6 @@ class Worker:
         poll_seconds = DEFAULT_QUEUE_RETRY_SECONDS
         while True:
             if self.state.drain_requested():
-                print_event(project_id, "drain requested; worker stopping")
                 return 0
             try:
                 project = self.client.get_project(project_id)
@@ -256,7 +255,6 @@ class Worker:
             self.process_task(project, task)
 
             if self.state.drain_requested():
-                print_event(project_id, "drain requested after task; stopping")
                 return 0
 
             try:
@@ -276,7 +274,6 @@ class Worker:
 
     def _claim_when_safe(self, project: Project, wid: str) -> Task | None:
         if self.state.drain_requested():
-            print_event(project.project_id, "drain requested before claim")
             return None
 
         resume_task = self.client.claim(project.project_id, wid, resume_only=True)
@@ -303,7 +300,6 @@ class Worker:
         slept = 0.0
         while slept < poll_seconds:
             if self.state.drain_requested():
-                print_event(project_id, "drain requested; worker stopping")
                 return False
             interval = min(DRAIN_CHECK_SECONDS, poll_seconds - slept)
             time.sleep(interval)

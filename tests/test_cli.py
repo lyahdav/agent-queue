@@ -4,7 +4,7 @@ from io import StringIO
 from unittest.mock import Mock, patch
 
 from agentq.api import QueueError
-from agentq.cli import build_parser, cmd_attach, cmd_status, cmd_watch, main
+from agentq.cli import build_parser, cmd_attach, cmd_status, cmd_watch, main, _spawn_worker
 from agentq.models import Project
 
 
@@ -20,6 +20,25 @@ class CliTests(unittest.TestCase):
         args = parser.parse_args(["worker", "--project", "demo"])
         self.assertEqual(args.project, "demo")
         self.assertFalse(args.forever)
+
+    def test_spawn_worker_uses_new_session_to_avoid_ctrl_c_tracebacks(self):
+        project = Project(
+            project_id="demo",
+            enabled=True,
+            sheet_name="Demo",
+            repo_path="/tmp/demo",
+            default_branch="main",
+            agent="codex",
+            use_tdd=False,
+            verify_command="python3 -m unittest",
+            poll_seconds=5,
+        )
+
+        with patch("agentq.cli.subprocess.Popen") as popen:
+            _spawn_worker(project)
+
+        popen.assert_called_once()
+        self.assertTrue(popen.call_args.kwargs["start_new_session"])
 
     def test_status_prints_module_attach_command(self):
         project = Project(
@@ -164,6 +183,7 @@ class CliTests(unittest.TestCase):
         proc.terminate.assert_not_called()
         self.assertIn("agentq watch draining: waiting for in-progress tasks to finish", stdout.getvalue())
         self.assertIn("agentq watch drained; exiting", stdout.getvalue())
+        self.assertNotIn("worker exited with code", stdout.getvalue())
 
     def test_watch_second_ctrl_c_force_stops_worker(self):
         project = Project(

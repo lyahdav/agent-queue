@@ -32,6 +32,7 @@ def _spawn_worker(project: Project) -> subprocess.Popen[str]:
     return subprocess.Popen(
         [sys.executable, "-m", "agentq", "worker", "--project", project.project_id, "--forever"],
         text=True,
+        start_new_session=True,
     )
 
 
@@ -59,7 +60,8 @@ def cmd_watch(args: argparse.Namespace) -> int:
             for project_id, proc in list(workers.items()):
                 if proc.poll() is not None:
                     workers.pop(project_id, None)
-                    print_event(project_id, f"worker exited with code {proc.returncode}")
+                    if not draining:
+                        print_event(project_id, f"worker exited with code {proc.returncode}")
             if draining:
                 if not workers:
                     state.clear_drain()
