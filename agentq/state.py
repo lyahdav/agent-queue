@@ -43,6 +43,7 @@ class StateStore:
             return {"active": {}, "runs": {}}
         data.setdefault("active", {})
         data.setdefault("runs", {})
+        data.setdefault("control", {})
         return data
 
     def _write_unlocked(self, data: dict[str, Any]) -> None:
@@ -86,6 +87,25 @@ class StateStore:
         if not run:
             return None
         return {"runId": run_id, **run}
+
+    def request_drain(self) -> None:
+        with locked_file(self.path.with_suffix(".lock")):
+            data = self.read()
+            control = data.setdefault("control", {})
+            control["drainRequested"] = True
+            control["updatedAt"] = int(time.time())
+            self._write_unlocked(data)
+
+    def clear_drain(self) -> None:
+        with locked_file(self.path.with_suffix(".lock")):
+            data = self.read()
+            control = data.setdefault("control", {})
+            control.pop("drainRequested", None)
+            control["updatedAt"] = int(time.time())
+            self._write_unlocked(data)
+
+    def drain_requested(self) -> bool:
+        return bool(self.read().get("control", {}).get("drainRequested"))
 
 
 def append_jsonl(path: Path, event: dict[str, Any]) -> None:

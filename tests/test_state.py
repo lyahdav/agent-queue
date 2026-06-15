@@ -20,6 +20,18 @@ class StateStoreTests(unittest.TestCase):
             self.assertIsNone(store.active_run_for_project("demo"))
             self.assertEqual(store.run("run-1")["status"], "VERIFY")
 
+    def test_drain_flag_round_trip_and_clear(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "state.json")
+
+            self.assertFalse(store.drain_requested())
+
+            store.request_drain()
+            self.assertTrue(store.drain_requested())
+
+            store.clear_drain()
+            self.assertFalse(store.drain_requested())
+
 
 if __name__ == "__main__":
     unittest.main()

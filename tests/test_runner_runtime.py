@@ -44,6 +44,9 @@ class FakeState:
     def finish_run(self, *args, **kwargs):
         self.finishes.append((args, kwargs))
 
+    def drain_requested(self):
+        return False
+
 
 class FlakyProjectClient:
     def __init__(self, project):
@@ -109,7 +112,8 @@ class RunnerRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(client.get_project_calls, 2)
-        sleep.assert_called_once_with(30)
+        self.assertEqual(sleep.call_count, 30)
+        sleep.assert_called_with(1)
         self.assertIn("[2026-06-15 01:49:54 PM] demo: queue unavailable; retrying in 30s: offline", stdout.getvalue())
 
     def test_non_forever_worker_surfaces_queue_errors(self):

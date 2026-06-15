@@ -26,6 +26,7 @@ from .state import StateStore, locked_file
 
 MAX_FIX_RETRIES = 10
 DEFAULT_QUEUE_RETRY_SECONDS = 30
+DRAIN_CHECK_SECONDS = 1
 
 
 def worker_id(project_id: str) -> str:
@@ -215,14 +216,18 @@ class Worker:
         wid = worker_id(project_id)
         poll_seconds = DEFAULT_QUEUE_RETRY_SECONDS
         while True:
+            if self.state.drain_requested():
+                print_event(project_id, "drain requested; worker stopping")
+                return 0
             try:
                 project = self.client.get_project(project_id)
             except QueueError as exc:
                 if not forever:
                     raise
                 print_event(project_id, f"queue unavailable; retrying in {poll_seconds}s: {exc}")
-                time.sleep(poll_seconds)
-                continue
+                if self._sleep_until_next_poll(project_id, poll_seconds):
+                    continue
+                return 0
             if project is None:
                 print_event(project_id, "project not found")
                 return 1
@@ -237,16 +242,22 @@ class Worker:
                 if not forever:
                     raise
                 print_event(project_id, f"queue unavailable; retrying in {poll_seconds}s: {exc}")
-                time.sleep(poll_seconds)
-                continue
+                if self._sleep_until_next_poll(project_id, poll_seconds):
+                    continue
+                return 0
             if task is None:
                 if not forever:
                     print_event(project_id, "no task claimed")
                     return 0
-                time.sleep(poll_seconds)
-                continue
+                if self._sleep_until_next_poll(project_id, poll_seconds):
+                    continue
+                return 0
 
             self.process_task(project, task)
+
+            if self.state.drain_requested():
+                print_event(project_id, "drain requested after task; stopping")
+                return 0
 
             try:
                 refreshed = self.client.get_project(project_id)
@@ -254,8 +265,9 @@ class Worker:
                 if not forever:
                     raise
                 print_event(project_id, f"queue unavailable; retrying in {poll_seconds}s: {exc}")
-                time.sleep(poll_seconds)
-                continue
+                if self._sleep_until_next_poll(project_id, poll_seconds):
+                    continue
+                return 0
             if refreshed is None or not refreshed.enabled:
                 print_event(project_id, "disabled after task; stopping")
                 return 0
@@ -263,6 +275,10 @@ class Worker:
                 return 0
 
     def _claim_when_safe(self, project: Project, wid: str) -> Task | None:
+        if self.state.drain_requested():
+            print_event(project.project_id, "drain requested before claim")
+            return None
+
         resume_task = self.client.claim(project.project_id, wid, resume_only=True)
         if resume_task is not None:
             print_event(project.project_id, f"resuming task {resume_task.id}")
@@ -282,6 +298,17 @@ class Worker:
         if task is not None:
             print_event(project.project_id, f"claimed task {task.id}")
         return task
+
+    def _sleep_until_next_poll(self, project_id: str, poll_seconds: int) -> bool:
+        slept = 0.0
+        while slept < poll_seconds:
+            if self.state.drain_requested():
+                print_event(project_id, "drain requested; worker stopping")
+                return False
+            interval = min(DRAIN_CHECK_SECONDS, poll_seconds - slept)
+            time.sleep(interval)
+            slept += interval
+        return not self.state.drain_requested()
 
     def process_task(self, project: Project, task: Task) -> None:
         run_log = RunLog(project, task)

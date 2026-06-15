@@ -12,6 +12,12 @@ from .models import Project
 from .runner import Worker, print_event
 from .state import StateStore
 
+WATCH_INTERRUPT_HINT = "Press Ctrl-C to stop after in-progress tasks finish; press Ctrl-C again to force stop."
+WATCH_DRAINING_MESSAGE = (
+    "agentq watch draining: waiting for in-progress tasks to finish, then exiting. "
+    "Press Ctrl-C again to force stop."
+)
+
 
 def print_error(message: str) -> None:
     print(f"[{format_log_timestamp()}] {message}", file=sys.stderr, flush=True)
@@ -29,16 +35,38 @@ def _spawn_worker(project: Project) -> subprocess.Popen[str]:
     )
 
 
+def _force_stop_workers(workers: dict[str, subprocess.Popen[str]]) -> None:
+    print("agentq watch stopping", flush=True)
+    for proc in workers.values():
+        proc.terminate()
+    for proc in workers.values():
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     client = QueueClient()
+    state = StateStore()
     workers: dict[str, subprocess.Popen[str]] = {}
+    draining = False
+    state.clear_drain()
     print("agentq watch started", flush=True)
-    try:
-        while True:
+    print(WATCH_INTERRUPT_HINT, flush=True)
+    while True:
+        try:
             for project_id, proc in list(workers.items()):
                 if proc.poll() is not None:
                     workers.pop(project_id, None)
                     print_event(project_id, f"worker exited with code {proc.returncode}")
+            if draining:
+                if not workers:
+                    state.clear_drain()
+                    print("agentq watch drained; exiting", flush=True)
+                    return 0
+                time.sleep(args.poll_seconds)
+                continue
             try:
                 projects = {project.project_id: project for project in client.list_projects()}
             except QueueError as exc:
@@ -52,16 +80,14 @@ def cmd_watch(args: argparse.Namespace) -> int:
                     workers[project.project_id] = _spawn_worker(project)
                     print_event(project.project_id, "worker started")
             time.sleep(args.poll_seconds)
-    except KeyboardInterrupt:
-        print("agentq watch stopping", flush=True)
-        for proc in workers.values():
-            proc.terminate()
-        for proc in workers.values():
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-        return 0
+        except KeyboardInterrupt:
+            if draining:
+                _force_stop_workers(workers)
+                state.clear_drain()
+                return 0
+            draining = True
+            state.request_drain()
+            print(WATCH_DRAINING_MESSAGE, flush=True)
 
 
 def cmd_add(args: argparse.Namespace) -> int:
