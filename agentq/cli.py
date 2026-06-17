@@ -142,7 +142,10 @@ def _tail_file(path: Path, *, all_logs: bool = False) -> int:
         print(f"Log file does not exist yet: {path}", file=sys.stderr)
         return 1
     lines = "+1" if all_logs else "80"
-    return subprocess.call(["tail", "-n", lines, "-f", str(path)])
+    try:
+        return subprocess.call(["tail", "-n", lines, "-f", str(path)])
+    except KeyboardInterrupt:
+        return 130
 
 
 def cmd_attach(args: argparse.Namespace) -> int:

@@ -1,10 +1,11 @@
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from agentq.api import QueueError
-from agentq.cli import build_parser, cmd_attach, cmd_status, cmd_watch, main, _spawn_worker
+from agentq.cli import build_parser, cmd_attach, cmd_status, cmd_watch, main, _spawn_worker, _tail_file
 from agentq.models import Project
 
 
@@ -96,6 +97,19 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         call.assert_called_once_with(["tail", "-n", "+1", "-f", "/tmp/output.log"])
+
+    def test_tail_file_handles_ctrl_c_without_traceback(self):
+        stderr = StringIO()
+
+        with (
+            patch("agentq.cli.Path.exists", return_value=True),
+            patch("agentq.cli.subprocess.call", side_effect=KeyboardInterrupt()),
+            redirect_stderr(stderr),
+        ):
+            result = _tail_file(Path("/tmp/output.log"), all_logs=True)
+
+        self.assertEqual(result, 130)
+        self.assertEqual(stderr.getvalue(), "")
 
     def test_main_timestamps_queue_errors(self):
         stderr = StringIO()
