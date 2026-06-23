@@ -27,6 +27,7 @@ from .state import StateStore, locked_file
 MAX_FIX_RETRIES = 10
 DEFAULT_QUEUE_RETRY_SECONDS = 30
 DRAIN_CHECK_SECONDS = 1
+AGENT_FAILURE_OUTPUT_CHARS = 4000
 
 
 def worker_id(project_id: str) -> str:
@@ -201,6 +202,16 @@ def verification_failure_text(path: Path) -> str:
     return text[-8000:]
 
 
+def agent_failure_message(agent_name: str, code: int, log_path: Path) -> str:
+    message = f"{agent_name} exited with code {code}"
+    if not log_path.exists():
+        return message
+    output = log_path.read_text(errors="replace").strip()
+    if not output:
+        return message
+    return f"{message}\n\nAgent output:\n{output[-AGENT_FAILURE_OUTPUT_CHARS:].lstrip()}"
+
+
 class Worker:
     def __init__(self, client: QueueClient, state: StateStore | None = None):
         self.client = client
@@ -330,9 +341,10 @@ class Worker:
     def _process_plan(self, project: Project, task: Task, run_log: RunLog, start: float) -> None:
         plan_file = run_log.run_dir / "plan.txt"
         self.state.update_run(project.project_id, run_log.run_id, status="PLANNING", currentLog=str(run_log.output_log))
+        phase_log = run_log.phase_log("agent.log")
         code = run_codex_to_file(project, plan_prompt(project, task), run_log, "agent.log", plan_file)
         if code != 0:
-            raise RuntimeError(f"plan agent exited with code {code}")
+            raise RuntimeError(agent_failure_message("plan agent", code, phase_log))
         plan_text = plan_file.read_text(errors="replace").strip() if plan_file.exists() else ""
         if not plan_text:
             plan_text = verification_failure_text(run_log.phase_log("agent.log"))
@@ -345,9 +357,10 @@ class Worker:
 
     def _process_implementation(self, project: Project, task: Task, run_log: RunLog, start: float) -> None:
         self.state.update_run(project.project_id, run_log.run_id, status="AGENT", currentLog=str(run_log.output_log))
+        phase_log = run_log.phase_log("agent.log")
         code = run_codex(project, implementation_prompt(project, task), run_log, "agent.log", "workspace-write")
         if code != 0:
-            raise RuntimeError(f"implementation agent exited with code {code}")
+            raise RuntimeError(agent_failure_message("implementation agent", code, phase_log))
 
         add_all(project.repo_path)
         diff = staged_diff(project.repo_path)
@@ -402,7 +415,7 @@ class Worker:
             fix_name = f"fix-{attempt + 1}.log"
             fix_code = run_codex(project, prompt, run_log, fix_name, "workspace-write")
             if fix_code != 0:
-                raise RuntimeError(f"fix agent exited with code {fix_code}")
+                raise RuntimeError(agent_failure_message("fix agent", fix_code, run_log.phase_log(fix_name)))
             add_all(project.repo_path)
             if not staged_diff(project.repo_path).strip():
                 raise RuntimeError(f"fix attempt {attempt + 1} produced no diff")

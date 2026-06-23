@@ -157,6 +157,36 @@ class RunnerRuntimeTests(unittest.TestCase):
             self.assertEqual(client.updates[0][1]["runtime"], "3s")
             self.assertEqual(state.finishes[0][1]["runtime"], "3s")
 
+    def test_failed_implementation_writes_agent_output_to_last_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client = FakeClient()
+            state = FakeState()
+            worker = Worker(client, state)
+            run_log = FakeRunLog(Path(tmp))
+            task = Task(id="7", status="IN PROGRESS", task="Fix parser")
+
+            def fail_agent(project, prompt, run_log, phase_name, sandbox):
+                run_log.phase_log(phase_name).write_text(
+                    "starting\n"
+                    "ERROR: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage "
+                    "to purchase more credits or try again at 5:39 PM.\n"
+                )
+                return 1
+
+            with (
+                patch("agentq.runner.RunLog", return_value=run_log),
+                patch("agentq.runner.run_codex", side_effect=fail_agent),
+                patch("agentq.runner.time.monotonic", return_value=3.0),
+                patch("agentq.runner.format_log_timestamp", return_value="2026-06-15 01:49:54 PM"),
+                redirect_stdout(StringIO()),
+            ):
+                worker.process_task(make_project(tmp), task)
+
+            self.assertEqual(client.updates[0][0], ("demo", "7", "FAILED"))
+            self.assertIn("implementation agent exited with code 1", client.updates[0][1]["last_error"])
+            self.assertIn("You've hit your usage limit", client.updates[0][1]["last_error"])
+            self.assertIn("You've hit your usage limit", client.updates[0][1]["reason"])
+
     def test_successful_implementation_writes_plain_sha_and_runtime(self):
         with tempfile.TemporaryDirectory() as tmp:
             client = FakeClient()
