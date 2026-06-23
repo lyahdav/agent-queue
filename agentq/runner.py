@@ -190,7 +190,7 @@ def fail_task(
 ) -> None:
     preview = reason.strip()[:5000]
     run_log.event("failed", preview)
-    client.update(project.project_id, task.id, "FAILED", reason=preview, last_error=preview, runtime=runtime)
+    client.update(project.project_id, task.id, "FAILED", last_error=preview, runtime=runtime)
     state.finish_run(project.project_id, run_log.run_id, status="FAILED", lastError=preview, runtime=runtime)
     print_event(project.project_id, f"task {task.id} FAILED")
 

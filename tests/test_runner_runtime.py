@@ -157,6 +157,19 @@ class RunnerRuntimeTests(unittest.TestCase):
             self.assertEqual(client.updates[0][1]["runtime"], "3s")
             self.assertEqual(state.finishes[0][1]["runtime"], "3s")
 
+    def test_fail_task_writes_error_only_to_last_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client = FakeClient()
+            state = FakeState()
+            run_log = FakeRunLog(Path(tmp))
+            task = Task(id="7", status="IN PROGRESS", task="Fix parser")
+
+            fail_task(client, make_project(), task, run_log, state, "boom", "3s")
+
+            self.assertEqual(client.updates[0][0], ("demo", "7", "FAILED"))
+            self.assertEqual(client.updates[0][1]["last_error"], "boom")
+            self.assertNotIn("reason", client.updates[0][1])
+
     def test_failed_implementation_writes_agent_output_to_last_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             client = FakeClient()
@@ -185,7 +198,7 @@ class RunnerRuntimeTests(unittest.TestCase):
             self.assertEqual(client.updates[0][0], ("demo", "7", "FAILED"))
             self.assertIn("implementation agent exited with code 1", client.updates[0][1]["last_error"])
             self.assertIn("You've hit your usage limit", client.updates[0][1]["last_error"])
-            self.assertIn("You've hit your usage limit", client.updates[0][1]["reason"])
+            self.assertNotIn("reason", client.updates[0][1])
 
     def test_successful_implementation_writes_plain_sha_and_runtime(self):
         with tempfile.TemporaryDirectory() as tmp:
