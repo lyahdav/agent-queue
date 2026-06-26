@@ -13,9 +13,9 @@ def format_log_timestamp() -> str:
     return time.strftime("%Y-%m-%d %I:%M:%S %p")
 
 
-def make_run_id(project_id: str, task_id: str) -> str:
+def make_run_id(project_id: str, task_id: str, agent: str) -> str:
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    return f"{project_id}-{task_id}-{stamp}"
+    return f"{project_id}-{task_id}-{agent}-{stamp}"
 
 
 def attach_command(run_id: str, *, all_logs: bool = False) -> str:
@@ -28,7 +28,7 @@ def attach_command(run_id: str, *, all_logs: bool = False) -> str:
 class RunLog:
     def __init__(self, project: Project, task: Task):
         ensure_app_dirs()
-        self.run_id = make_run_id(project.project_id, task.id)
+        self.run_id = make_run_id(project.project_id, task.id, project.agent)
         self.run_dir = RUNS_DIR / project.project_id / f"{task.id}-{self.run_id.rsplit('-', 1)[-1]}"
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.output_log = self.run_dir / "output.log"

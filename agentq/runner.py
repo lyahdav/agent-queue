@@ -341,7 +341,11 @@ class Worker:
             runDir=str(run_log.run_dir),
             outputLog=str(run_log.output_log),
         )
-        print_event(project.project_id, f"task {task.id} started; attach: {attach_command(run_log.run_id, all_logs=True)}")
+        print_event(
+            project.project_id,
+            f"task {task.id} started with {project.agent}; "
+            f"attach: {attach_command(run_log.run_id, all_logs=True)}",
+        )
         try:
             if task.original_status == "PLAN" or task.status == "PLAN IN PROGRESS":
                 self._process_plan(project, task, run_log, start)
