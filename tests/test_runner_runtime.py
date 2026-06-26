@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from agentq.api import QueueError
 from agentq.models import Project, Task
-from agentq.runner import Worker, fail_task
+from agentq.runner import Worker, fail_task, run_agent, run_agent_to_file
 
 
 class FakeClient:
@@ -178,7 +178,7 @@ class RunnerRuntimeTests(unittest.TestCase):
             run_log = FakeRunLog(Path(tmp))
             task = Task(id="7", status="IN PROGRESS", task="Fix parser")
 
-            def fail_agent(project, prompt, run_log, phase_name, sandbox):
+            def fail_agent(project, prompt, run_log, phase_name, writable=True):
                 run_log.phase_log(phase_name).write_text(
                     "starting\n"
                     "ERROR: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage "
@@ -188,7 +188,7 @@ class RunnerRuntimeTests(unittest.TestCase):
 
             with (
                 patch("agentq.runner.RunLog", return_value=run_log),
-                patch("agentq.runner.run_codex", side_effect=fail_agent),
+                patch("agentq.runner.run_agent", side_effect=fail_agent),
                 patch("agentq.runner.time.monotonic", return_value=3.0),
                 patch("agentq.runner.format_log_timestamp", return_value="2026-06-15 01:49:54 PM"),
                 redirect_stdout(StringIO()),
@@ -209,10 +209,10 @@ class RunnerRuntimeTests(unittest.TestCase):
             task = Task(id="7", status="IN PROGRESS", task="Fix parser")
 
             with (
-                patch("agentq.runner.run_codex", return_value=0),
+                patch("agentq.runner.run_agent", return_value=0),
                 patch("agentq.runner.add_all"),
                 patch("agentq.runner.staged_diff", return_value="diff"),
-                patch("agentq.runner.run_codex_to_file", return_value=1),
+                patch("agentq.runner.run_agent_to_file", return_value=1),
                 patch("agentq.runner.commit"),
                 patch.object(Worker, "_verify_with_fix_loop"),
                 patch("agentq.runner.push"),
@@ -238,7 +238,7 @@ class RunnerRuntimeTests(unittest.TestCase):
                 return 0
 
             with (
-                patch("agentq.runner.run_codex_to_file", side_effect=write_plan),
+                patch("agentq.runner.run_agent_to_file", side_effect=write_plan),
                 patch("agentq.runner.time.monotonic", return_value=42.0),
             ):
                 worker._process_plan(make_project(tmp), task, run_log, start=0.0)
@@ -246,6 +246,57 @@ class RunnerRuntimeTests(unittest.TestCase):
             self.assertEqual(client.updates[0][0], ("demo", "8", "PLAN REVIEW"))
             self.assertEqual(client.updates[0][1]["reason"], "plan text")
             self.assertEqual(client.updates[0][1]["runtime"], "42s")
+
+
+def make_claude_project(repo_path="/tmp/demo"):
+    project = make_project(repo_path)
+    return Project(
+        project_id=project.project_id,
+        enabled=project.enabled,
+        sheet_name=project.sheet_name,
+        repo_path=project.repo_path,
+        default_branch=project.default_branch,
+        agent="claude",
+        use_tdd=project.use_tdd,
+        verify_command=project.verify_command,
+        poll_seconds=project.poll_seconds,
+    )
+
+
+class AgentDispatchTests(unittest.TestCase):
+    def test_run_agent_uses_codex_command_for_codex_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_log = FakeRunLog(Path(tmp))
+            run_log.append_output_header = lambda *_: None
+            with patch("agentq.runner.run_args_to_logs", return_value=0) as ran:
+                run_agent(make_project(tmp), "do it", run_log, "agent.log", writable=True)
+            args = ran.call_args[0][0]
+            self.assertEqual(args[0], "codex")
+            self.assertIn("workspace-write", args)
+
+    def test_run_agent_uses_claude_command_for_claude_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_log = FakeRunLog(Path(tmp))
+            run_log.append_output_header = lambda *_: None
+            with patch("agentq.runner.run_args_to_logs", return_value=0) as ran:
+                run_agent(make_claude_project(tmp), "do it", run_log, "agent.log", writable=True)
+            args = ran.call_args[0][0]
+            self.assertEqual(args[0], "claude")
+            self.assertIn("bypassPermissions", args)
+            self.assertEqual(args[-1], "do it")
+
+    def test_run_agent_to_file_uses_plan_mode_for_claude_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_log = FakeRunLog(Path(tmp))
+            run_log.append_output_header = lambda *_: None
+            with patch("agentq.runner.run_args_to_file", return_value=0) as ran:
+                run_agent_to_file(
+                    make_claude_project(tmp), "plan it", run_log, "agent.log", Path(tmp) / "out.txt"
+                )
+            args = ran.call_args[0][0]
+            self.assertEqual(args[0], "claude")
+            self.assertIn("plan", args)
+            self.assertNotIn("bypassPermissions", args)
 
 
 if __name__ == "__main__":

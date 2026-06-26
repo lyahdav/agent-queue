@@ -20,7 +20,7 @@ from .gitutils import (
 )
 from .logs import RunLog, attach_command, format_log_timestamp
 from .models import Project, Task
-from .process import run_args_to_logs, run_shell_to_logs
+from .process import run_args_to_file, run_args_to_logs, run_shell_to_logs
 from .state import StateStore, locked_file
 
 
@@ -65,6 +65,11 @@ def codex_base_args(repo: str, sandbox: str) -> list[str]:
         "--color",
         "never",
     ]
+
+
+def claude_base_args(writable: bool) -> list[str]:
+    mode = "bypassPermissions" if writable else "plan"
+    return ["claude", "-p", "--output-format", "text", "--permission-mode", mode]
 
 
 def implementation_guidance(project: Project) -> str:
@@ -160,16 +165,23 @@ def fix_prompt(task: Task, verify_command: str, last_commit: str, failure_text: 
     )
 
 
-def run_codex(project: Project, prompt: str, run_log: RunLog, phase_name: str, sandbox: str) -> int:
+def run_agent(project: Project, prompt: str, run_log: RunLog, phase_name: str, writable: bool = True) -> int:
     phase_log = run_log.phase_log(phase_name)
     run_log.append_output_header(phase_name)
-    args = [*codex_base_args(project.repo_path, sandbox), prompt]
+    if project.agent == "claude":
+        args = [*claude_base_args(writable), prompt]
+    else:
+        sandbox = "workspace-write" if writable else "read-only"
+        args = [*codex_base_args(project.repo_path, sandbox), prompt]
     return run_args_to_logs(args, project.repo_path, phase_log, run_log.output_log)
 
 
-def run_codex_to_file(project: Project, prompt: str, run_log: RunLog, phase_name: str, output_file: Path) -> int:
+def run_agent_to_file(project: Project, prompt: str, run_log: RunLog, phase_name: str, output_file: Path) -> int:
     phase_log = run_log.phase_log(phase_name)
     run_log.append_output_header(phase_name)
+    if project.agent == "claude":
+        args = [*claude_base_args(writable=False), prompt]
+        return run_args_to_file(args, project.repo_path, phase_log, run_log.output_log, output_file)
     args = [
         *codex_base_args(project.repo_path, "read-only"),
         "--output-last-message",
@@ -342,7 +354,7 @@ class Worker:
         plan_file = run_log.run_dir / "plan.txt"
         self.state.update_run(project.project_id, run_log.run_id, status="PLANNING", currentLog=str(run_log.output_log))
         phase_log = run_log.phase_log("agent.log")
-        code = run_codex_to_file(project, plan_prompt(project, task), run_log, "agent.log", plan_file)
+        code = run_agent_to_file(project, plan_prompt(project, task), run_log, "agent.log", plan_file)
         if code != 0:
             raise RuntimeError(agent_failure_message("plan agent", code, phase_log))
         plan_text = plan_file.read_text(errors="replace").strip() if plan_file.exists() else ""
@@ -358,7 +370,7 @@ class Worker:
     def _process_implementation(self, project: Project, task: Task, run_log: RunLog, start: float) -> None:
         self.state.update_run(project.project_id, run_log.run_id, status="AGENT", currentLog=str(run_log.output_log))
         phase_log = run_log.phase_log("agent.log")
-        code = run_codex(project, implementation_prompt(project, task), run_log, "agent.log", "workspace-write")
+        code = run_agent(project, implementation_prompt(project, task), run_log, "agent.log", writable=True)
         if code != 0:
             raise RuntimeError(agent_failure_message("implementation agent", code, phase_log))
 
@@ -368,7 +380,7 @@ class Worker:
             raise RuntimeError("agent produced no staged diff")
 
         message_file = run_log.run_dir / "commit-message.txt"
-        code = run_codex_to_file(project, commit_message_prompt(task, diff), run_log, "commit-message.log", message_file)
+        code = run_agent_to_file(project, commit_message_prompt(task, diff), run_log, "commit-message.log", message_file)
         message = message_file.read_text(errors="replace").strip() if code == 0 and message_file.exists() else ""
         if not message:
             message = task.task[:72]
@@ -413,7 +425,7 @@ class Worker:
                 project.use_tdd,
             )
             fix_name = f"fix-{attempt + 1}.log"
-            fix_code = run_codex(project, prompt, run_log, fix_name, "workspace-write")
+            fix_code = run_agent(project, prompt, run_log, fix_name, writable=True)
             if fix_code != 0:
                 raise RuntimeError(agent_failure_message("fix agent", fix_code, run_log.phase_log(fix_name)))
             add_all(project.repo_path)

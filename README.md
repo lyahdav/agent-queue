@@ -28,7 +28,7 @@ Project columns:
 | Sheet Name | Name of the task tab for this project. Defaults to `Project ID` when blank. |
 | Repo Path | Local filesystem path to the git repository for this project. |
 | Default Branch | Branch the worker must be on before claiming tasks. Defaults to `main` when blank. |
-| Agent | Agent runner to use. Currently supported value: `codex`. Blank also defaults to `codex`; other values are reserved for future runners. |
+| Agent | Agent runner to use. Supported values: `codex` (default) and `claude`. Blank or any unrecognized value falls back to `codex`. The setting is read fresh per task, so changing it takes effect on the next task without restarting `agentq watch`. |
 | TDD? | Controls whether implementation prompts require TDD for code changes. Uses the same truthy values as `Enabled`; blank or false disables TDD guidance. |
 | Verify Command | Shell command run from `Repo Path` after the agent commits its work. This is required for implementation tasks; failures trigger the fix loop. Example: `python3 -m pytest`. |
 | Poll Seconds | How often a forever worker checks for another task when none is available. Defaults to `30`; values below `5` are raised to `5`; invalid values default to `30`. |

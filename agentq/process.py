@@ -29,6 +29,19 @@ def run_shell_to_logs(command: str, cwd: str | Path, phase_log: Path, output_log
         return proc.wait()
 
 
+def run_args_to_file(
+    args: list[str], cwd: str | Path, phase_log: Path, output_log: Path, output_file: Path
+) -> int:
+    proc = subprocess.run(args, cwd=str(cwd), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    with phase_log.open("a") as phase, output_log.open("a") as combined:
+        for stream in (proc.stdout, proc.stderr):
+            if stream:
+                phase.write(stream)
+                combined.write(stream)
+    Path(output_file).write_text(proc.stdout or "")
+    return proc.returncode
+
+
 def run_args_to_logs(args: list[str], cwd: str | Path, phase_log: Path, output_log: Path) -> int:
     with phase_log.open("a") as phase, output_log.open("a") as combined:
         proc = subprocess.Popen(
