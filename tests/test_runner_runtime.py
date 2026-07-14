@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from agentq.api import QueueError
 from agentq.models import Project, Task
-from agentq.runner import Worker, fail_task, run_agent, run_agent_to_file
+from agentq.runner import Worker, agent_runtime_description, fail_task, run_agent, run_agent_to_file
 
 
 class FakeClient:
@@ -133,6 +133,10 @@ class RunnerRuntimeTests(unittest.TestCase):
 
             with (
                 patch("agentq.runner.RunLog", return_value=run_log),
+                patch(
+                    "agentq.runner.agent_runtime_description",
+                    return_value="codex (gpt-5.6-sol, high reasoning)",
+                ),
                 patch.object(Worker, "_process_implementation"),
                 patch("agentq.runner.format_log_timestamp", return_value="2026-06-15 01:49:54 PM"),
                 redirect_stdout(stdout),
@@ -140,7 +144,8 @@ class RunnerRuntimeTests(unittest.TestCase):
                 worker.process_task(make_project(), task)
 
             self.assertIn(
-                "[2026-06-15 01:49:54 PM] demo: task 7 started with codex; "
+                "[2026-06-15 01:49:54 PM] demo: task 7 started with "
+                "codex (gpt-5.6-sol, high reasoning); "
                 "attach: python3 -m agentq attach --run run-1 --all",
                 stdout.getvalue(),
             )
@@ -156,13 +161,66 @@ class RunnerRuntimeTests(unittest.TestCase):
 
             with (
                 patch("agentq.runner.RunLog", return_value=run_log),
+                patch(
+                    "agentq.runner.agent_runtime_description",
+                    return_value="claude (claude-opus-4-6, xhigh reasoning)",
+                ),
                 patch.object(Worker, "_process_implementation"),
                 patch("agentq.runner.format_log_timestamp", return_value="2026-06-15 01:49:54 PM"),
                 redirect_stdout(stdout),
             ):
                 worker.process_task(make_claude_project(), task)
 
-            self.assertIn("task 7 started with claude;", stdout.getvalue())
+            self.assertIn(
+                "task 7 started with claude (claude-opus-4-6, xhigh reasoning);",
+                stdout.getvalue(),
+            )
+
+    def test_codex_runtime_description_reads_model_and_reasoning_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            codex_home = root / "codex-home"
+            repo = root / "repo"
+            codex_home.mkdir()
+            (repo / ".codex").mkdir(parents=True)
+            (codex_home / "config.toml").write_text(
+                'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "medium"\n'
+            )
+            (repo / ".codex" / "config.toml").write_text(
+                'model_reasoning_effort = "high"\n'
+            )
+
+            description = agent_runtime_description(
+                make_project(repo),
+                home=root,
+                environ={"CODEX_HOME": str(codex_home)},
+            )
+
+            self.assertEqual(description, "codex (gpt-5.6-sol, high reasoning)")
+
+    def test_claude_runtime_description_reads_settings_and_environment_overrides(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            (root / ".claude").mkdir()
+            (repo / ".claude").mkdir(parents=True)
+            (root / ".claude" / "settings.json").write_text(
+                '{"model": "claude-sonnet-4-6", "effortLevel": "medium"}'
+            )
+            (repo / ".claude" / "settings.local.json").write_text(
+                '{"effortLevel": "high"}'
+            )
+
+            description = agent_runtime_description(
+                make_claude_project(repo),
+                home=root,
+                environ={
+                    "ANTHROPIC_MODEL": "claude-opus-4-6",
+                    "CLAUDE_CODE_EFFORT_LEVEL": "xhigh",
+                },
+            )
+
+            self.assertEqual(description, "claude (claude-opus-4-6, xhigh reasoning)")
 
     def test_fail_task_writes_runtime(self):
         with tempfile.TemporaryDirectory() as tmp:

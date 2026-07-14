@@ -125,9 +125,10 @@ Use `python3 -m agentq attach --project <projectId>` or
 `python3 -m agentq attach --run <runId> --all` to follow one task's
 `output.log` without intermingled output from other projects. The `<runId>`
 embeds the agent that ran the task (e.g. `claude` or `codex`), so the attach
-command and the `watch` "task started with <agent>" log both name it. By default,
-`attach` starts with the last 80 lines; `--all` prints the whole prior log
-before following new output.
+command and the `watch` task-start log both name it. The task-start log also
+includes the configured model and reasoning level, for example
+`codex (gpt-5.6-sol, high reasoning)`. By default, `attach` starts with the last
+80 lines; `--all` prints the whole prior log before following new output.
 
 ## Safety Defaults
 

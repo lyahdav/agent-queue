@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import json
 import os
 import socket
 import time
 from pathlib import Path
+from typing import Mapping
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
+    tomllib = None
 
 from .api import QueueClient, QueueError
 from .config import LOCKS_DIR, ensure_app_dirs
@@ -28,6 +35,97 @@ MAX_FIX_RETRIES = 10
 DEFAULT_QUEUE_RETRY_SECONDS = 30
 DRAIN_CHECK_SECONDS = 1
 AGENT_FAILURE_OUTPUT_CHARS = 4000
+
+
+def _read_toml_values(path: Path) -> dict[str, object]:
+    try:
+        if tomllib is not None:
+            with path.open("rb") as config_file:
+                return tomllib.load(config_file)
+        values: dict[str, object] = {}
+        for raw_line in path.read_text().splitlines():
+            line = raw_line.strip()
+            if line.startswith("["):
+                break
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.split("#", 1)[0].strip().strip('"').strip("'")
+        return values
+    except (OSError, ValueError):
+        return {}
+
+
+def _read_json_object(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _codex_runtime_settings(
+    repo_path: str | Path, home: Path, environ: Mapping[str, str]
+) -> tuple[str, str]:
+    codex_home = Path(environ.get("CODEX_HOME", home / ".codex"))
+    settings: dict[str, object] = {}
+    for path in (codex_home / "config.toml", Path(repo_path) / ".codex" / "config.toml"):
+        current = _read_toml_values(path)
+        for key in ("model", "model_reasoning_effort"):
+            if key in current:
+                settings[key] = current[key]
+    return str(settings.get("model") or "default"), str(
+        settings.get("model_reasoning_effort") or "default"
+    )
+
+
+def _claude_runtime_settings(
+    repo_path: str | Path, home: Path, environ: Mapping[str, str]
+) -> tuple[str, str]:
+    settings: dict[str, object] = {}
+    configured_environment: dict[str, str] = {}
+    paths = (
+        home / ".claude" / "settings.json",
+        Path(repo_path) / ".claude" / "settings.json",
+        Path(repo_path) / ".claude" / "settings.local.json",
+    )
+    for path in paths:
+        current = _read_json_object(path)
+        for key in ("model", "effortLevel"):
+            if key in current:
+                settings[key] = current[key]
+        current_environment = current.get("env")
+        if isinstance(current_environment, dict):
+            configured_environment.update(
+                {str(key): str(value) for key, value in current_environment.items()}
+            )
+
+    model = environ.get("ANTHROPIC_MODEL") or configured_environment.get("ANTHROPIC_MODEL")
+    reasoning = environ.get("CLAUDE_CODE_EFFORT_LEVEL") or configured_environment.get(
+        "CLAUDE_CODE_EFFORT_LEVEL"
+    )
+    return str(model or settings.get("model") or "default"), str(
+        reasoning or settings.get("effortLevel") or "default"
+    )
+
+
+def agent_runtime_description(
+    project: Project,
+    *,
+    home: Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    resolved_home = home or Path.home()
+    resolved_environment = environ if environ is not None else os.environ
+    if project.agent == "claude":
+        model, reasoning = _claude_runtime_settings(
+            project.repo_path, resolved_home, resolved_environment
+        )
+    else:
+        model, reasoning = _codex_runtime_settings(
+            project.repo_path, resolved_home, resolved_environment
+        )
+    return f"{project.agent} ({model}, {reasoning} reasoning)"
 
 
 def worker_id(project_id: str) -> str:
@@ -343,7 +441,7 @@ class Worker:
         )
         print_event(
             project.project_id,
-            f"task {task.id} started with {project.agent}; "
+            f"task {task.id} started with {agent_runtime_description(project)}; "
             f"attach: {attach_command(run_log.run_id, all_logs=True)}",
         )
         try:
