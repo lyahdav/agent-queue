@@ -118,8 +118,14 @@ Each run contains:
 - `events.jsonl`
 - `output.log`
 - `agent.log`
+- `agent-last-message.txt`
 - `verify.log`
 - `fix-<n>.log`
+- `fix-<n>-last-message.txt`
+
+The last-message files capture the agent's final response separately from its
+full execution log. When an agent completes without changing the repository,
+that response is included in the task's `Last Error` for diagnosis.
 
 Use `python3 -m agentq attach --project <projectId>` or
 `python3 -m agentq attach --run <runId> --all` to follow one task's

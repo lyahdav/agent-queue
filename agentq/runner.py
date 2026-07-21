@@ -263,15 +263,31 @@ def fix_prompt(task: Task, verify_command: str, last_commit: str, failure_text: 
     )
 
 
-def run_agent(project: Project, prompt: str, run_log: RunLog, phase_name: str, writable: bool = True) -> int:
+def run_agent(
+    project: Project,
+    prompt: str,
+    run_log: RunLog,
+    phase_name: str,
+    writable: bool = True,
+    last_message_file: Path | None = None,
+) -> int:
     phase_log = run_log.phase_log(phase_name)
     run_log.append_output_header(phase_name)
     if project.agent == "claude":
         args = [*claude_base_args(writable), prompt]
     else:
         sandbox = "workspace-write" if writable else "read-only"
-        args = [*codex_base_args(project.repo_path, sandbox), prompt]
-    return run_args_to_logs(args, project.repo_path, phase_log, run_log.output_log)
+        args = codex_base_args(project.repo_path, sandbox)
+        if last_message_file is not None:
+            args.extend(["--output-last-message", str(last_message_file)])
+        args.append(prompt)
+    code = run_args_to_logs(args, project.repo_path, phase_log, run_log.output_log)
+    if project.agent == "claude" and last_message_file is not None and phase_log.exists():
+        try:
+            last_message_file.write_text(phase_log.read_text(errors="replace"))
+        except OSError:
+            pass
+    return code
 
 
 def run_agent_to_file(project: Project, prompt: str, run_log: RunLog, phase_name: str, output_file: Path) -> int:
@@ -302,7 +318,8 @@ def fail_task(
     run_log.event("failed", preview)
     client.update(project.project_id, task.id, "FAILED", last_error=preview, runtime=runtime)
     state.finish_run(project.project_id, run_log.run_id, status="FAILED", lastError=preview, runtime=runtime)
-    print_event(project.project_id, f"task {task.id} FAILED")
+    summary = next((" ".join(line.split()) for line in preview.splitlines() if line.strip()), "unknown error")
+    print_event(project.project_id, f"task {task.id} FAILED: {summary[:240]}")
 
 
 def verification_failure_text(path: Path) -> str:
@@ -320,6 +337,24 @@ def agent_failure_message(agent_name: str, code: int, log_path: Path) -> str:
     if not output:
         return message
     return f"{message}\n\nAgent output:\n{output[-AGENT_FAILURE_OUTPUT_CHARS:].lstrip()}"
+
+
+def agent_no_changes_message(
+    phase_name: str,
+    last_message_path: Path,
+    log_path: Path,
+) -> str:
+    message = f"{phase_name} completed without repository changes"
+    response = ""
+    for path in (last_message_path, log_path):
+        if not path.exists():
+            continue
+        response = path.read_text(errors="replace").strip()
+        if response:
+            break
+    if not response:
+        return message
+    return f"{message}\n\nAgent response:\n{response[-AGENT_FAILURE_OUTPUT_CHARS:].lstrip()}"
 
 
 class Worker:
@@ -472,14 +507,24 @@ class Worker:
     def _process_implementation(self, project: Project, task: Task, run_log: RunLog, start: float) -> None:
         self.state.update_run(project.project_id, run_log.run_id, status="AGENT", currentLog=str(run_log.output_log))
         phase_log = run_log.phase_log("agent.log")
-        code = run_agent(project, implementation_prompt(project, task), run_log, "agent.log", writable=True)
+        last_message_file = run_log.run_dir / "agent-last-message.txt"
+        code = run_agent(
+            project,
+            implementation_prompt(project, task),
+            run_log,
+            "agent.log",
+            writable=True,
+            last_message_file=last_message_file,
+        )
         if code != 0:
             raise RuntimeError(agent_failure_message("implementation agent", code, phase_log))
 
         add_all(project.repo_path)
         diff = staged_diff(project.repo_path)
         if not diff.strip():
-            raise RuntimeError("agent produced no staged diff")
+            raise RuntimeError(
+                agent_no_changes_message("implementation agent", last_message_file, phase_log)
+            )
 
         message_file = run_log.run_dir / "commit-message.txt"
         code = run_agent_to_file(project, commit_message_prompt(task, diff), run_log, "commit-message.log", message_file)
@@ -527,10 +572,24 @@ class Worker:
                 project.use_tdd,
             )
             fix_name = f"fix-{attempt + 1}.log"
-            fix_code = run_agent(project, prompt, run_log, fix_name, writable=True)
+            fix_last_message_file = run_log.run_dir / f"fix-{attempt + 1}-last-message.txt"
+            fix_code = run_agent(
+                project,
+                prompt,
+                run_log,
+                fix_name,
+                writable=True,
+                last_message_file=fix_last_message_file,
+            )
             if fix_code != 0:
                 raise RuntimeError(agent_failure_message("fix agent", fix_code, run_log.phase_log(fix_name)))
             add_all(project.repo_path)
             if not staged_diff(project.repo_path).strip():
-                raise RuntimeError(f"fix attempt {attempt + 1} produced no diff")
+                raise RuntimeError(
+                    agent_no_changes_message(
+                        f"fix attempt {attempt + 1}",
+                        fix_last_message_file,
+                        run_log.phase_log(fix_name),
+                    )
+                )
             amend(project.repo_path)

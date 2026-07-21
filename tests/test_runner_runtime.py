@@ -256,7 +256,14 @@ class RunnerRuntimeTests(unittest.TestCase):
             run_log = FakeRunLog(Path(tmp))
             task = Task(id="7", status="IN PROGRESS", task="Fix parser")
 
-            def fail_agent(project, prompt, run_log, phase_name, writable=True):
+            def fail_agent(
+                project,
+                prompt,
+                run_log,
+                phase_name,
+                writable=True,
+                last_message_file=None,
+            ):
                 run_log.phase_log(phase_name).write_text(
                     "starting\n"
                     "ERROR: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage "
@@ -277,6 +284,85 @@ class RunnerRuntimeTests(unittest.TestCase):
             self.assertIn("implementation agent exited with code 1", client.updates[0][1]["last_error"])
             self.assertIn("You've hit your usage limit", client.updates[0][1]["last_error"])
             self.assertNotIn("reason", client.updates[0][1])
+
+    def test_implementation_without_changes_surfaces_agent_response(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client = FakeClient()
+            state = FakeState()
+            worker = Worker(client, state)
+            run_log = FakeRunLog(Path(tmp))
+            task = Task(id="7", status="IN PROGRESS", task="Fix parser")
+            stdout = StringIO()
+
+            def no_change_agent(
+                project,
+                prompt,
+                run_log,
+                phase_name,
+                writable=True,
+                last_message_file=None,
+            ):
+                self.assertIsNotNone(last_message_file)
+                last_message_file.write_text(
+                    "I can't implement this because the current repository has no parser code.\n"
+                )
+                return 0
+
+            with (
+                patch("agentq.runner.RunLog", return_value=run_log),
+                patch("agentq.runner.run_agent", side_effect=no_change_agent),
+                patch("agentq.runner.add_all"),
+                patch("agentq.runner.staged_diff", return_value=""),
+                patch("agentq.runner.time.monotonic", return_value=3.0),
+                patch("agentq.runner.format_log_timestamp", return_value="2026-06-15 01:49:54 PM"),
+                redirect_stdout(stdout),
+            ):
+                worker.process_task(make_project(tmp), task)
+
+            self.assertEqual(client.updates[0][0], ("demo", "7", "FAILED"))
+            last_error = client.updates[0][1]["last_error"]
+            self.assertIn("implementation agent completed without repository changes", last_error)
+            self.assertIn("current repository has no parser code", last_error)
+            self.assertIn(
+                "demo: task 7 FAILED: implementation agent completed without repository changes",
+                stdout.getvalue(),
+            )
+
+    def test_implementation_without_changes_falls_back_to_agent_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client = FakeClient()
+            state = FakeState()
+            worker = Worker(client, state)
+            run_log = FakeRunLog(Path(tmp))
+            task = Task(id="7", status="IN PROGRESS", task="Fix parser")
+
+            def no_change_agent(
+                project,
+                prompt,
+                run_log,
+                phase_name,
+                writable=True,
+                last_message_file=None,
+            ):
+                run_log.phase_log(phase_name).write_text(
+                    "The requested component is not present in this checkout.\n"
+                )
+                return 0
+
+            with (
+                patch("agentq.runner.RunLog", return_value=run_log),
+                patch("agentq.runner.run_agent", side_effect=no_change_agent),
+                patch("agentq.runner.add_all"),
+                patch("agentq.runner.staged_diff", return_value=""),
+                patch("agentq.runner.time.monotonic", return_value=3.0),
+                redirect_stdout(StringIO()),
+            ):
+                worker.process_task(make_project(tmp), task)
+
+            self.assertIn(
+                "requested component is not present",
+                client.updates[0][1]["last_error"],
+            )
 
     def test_successful_implementation_writes_plain_sha_and_runtime(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -347,21 +433,48 @@ class AgentDispatchTests(unittest.TestCase):
             run_log = FakeRunLog(Path(tmp))
             run_log.append_output_header = lambda *_: None
             with patch("agentq.runner.run_args_to_logs", return_value=0) as ran:
-                run_agent(make_project(tmp), "do it", run_log, "agent.log", writable=True)
+                last_message_file = Path(tmp) / "last-message.txt"
+                run_agent(
+                    make_project(tmp),
+                    "do it",
+                    run_log,
+                    "agent.log",
+                    writable=True,
+                    last_message_file=last_message_file,
+                )
             args = ran.call_args[0][0]
             self.assertEqual(args[0], "codex")
             self.assertIn("workspace-write", args)
+            self.assertIn("--output-last-message", args)
+            self.assertIn(str(last_message_file), args)
 
     def test_run_agent_uses_claude_command_for_claude_project(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_log = FakeRunLog(Path(tmp))
             run_log.append_output_header = lambda *_: None
-            with patch("agentq.runner.run_args_to_logs", return_value=0) as ran:
-                run_agent(make_claude_project(tmp), "do it", run_log, "agent.log", writable=True)
+
+            def write_agent_log(args, cwd, phase_log, output_log):
+                phase_log.write_text("The requested code is not in this repository.\n")
+                return 0
+
+            with patch("agentq.runner.run_args_to_logs", side_effect=write_agent_log) as ran:
+                last_message_file = Path(tmp) / "last-message.txt"
+                run_agent(
+                    make_claude_project(tmp),
+                    "do it",
+                    run_log,
+                    "agent.log",
+                    writable=True,
+                    last_message_file=last_message_file,
+                )
             args = ran.call_args[0][0]
             self.assertEqual(args[0], "claude")
             self.assertIn("bypassPermissions", args)
             self.assertEqual(args[-1], "do it")
+            self.assertEqual(
+                last_message_file.read_text(),
+                "The requested code is not in this repository.\n",
+            )
 
     def test_run_agent_to_file_uses_plan_mode_for_claude_project(self):
         with tempfile.TemporaryDirectory() as tmp:
