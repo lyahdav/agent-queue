@@ -176,7 +176,14 @@ class RunnerRuntimeTests(unittest.TestCase):
                 stdout.getvalue(),
             )
 
-    def test_codex_runtime_description_reads_model_and_reasoning_config(self):
+    def test_codex_runtime_description_uses_queue_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(
+                agent_runtime_description(make_project(tmp)),
+                "codex (gpt-6-sol, high reasoning)",
+            )
+
+    def test_codex_runtime_description_uses_project_overrides(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             codex_home = root / "codex-home"
@@ -187,7 +194,7 @@ class RunnerRuntimeTests(unittest.TestCase):
                 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "medium"\n'
             )
             (repo / ".codex" / "config.toml").write_text(
-                'model_reasoning_effort = "high"\n'
+                'model = "gpt-6-luna"\nmodel_reasoning_effort = "xhigh"\n'
             )
 
             description = agent_runtime_description(
@@ -196,7 +203,7 @@ class RunnerRuntimeTests(unittest.TestCase):
                 environ={"CODEX_HOME": str(codex_home)},
             )
 
-            self.assertEqual(description, "codex (gpt-5.6-sol, high reasoning)")
+            self.assertEqual(description, "codex (gpt-6-luna, xhigh reasoning)")
 
     def test_claude_runtime_description_reads_settings_and_environment_overrides(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -444,9 +451,29 @@ class AgentDispatchTests(unittest.TestCase):
                 )
             args = ran.call_args[0][0]
             self.assertEqual(args[0], "codex")
+            self.assertEqual(args[args.index("--model") + 1], "gpt-6-sol")
+            self.assertEqual(
+                args[args.index("--config") + 1], "model_reasoning_effort=high"
+            )
             self.assertIn("workspace-write", args)
             self.assertIn("--output-last-message", args)
             self.assertIn(str(last_message_file), args)
+
+    def test_codex_command_uses_project_model_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / ".codex").mkdir()
+            (repo / ".codex" / "config.toml").write_text('model = "gpt-6-luna"\n')
+            run_log = FakeRunLog(repo)
+            run_log.append_output_header = lambda *_: None
+            with patch("agentq.runner.run_args_to_logs", return_value=0) as ran:
+                run_agent(make_project(repo), "do it", run_log, "agent.log")
+
+            args = ran.call_args[0][0]
+            self.assertEqual(args[args.index("--model") + 1], "gpt-6-luna")
+            self.assertEqual(
+                args[args.index("--config") + 1], "model_reasoning_effort=high"
+            )
 
     def test_run_agent_uses_claude_command_for_claude_project(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -8,6 +8,11 @@ different projects can run in parallel.
 Each task gets a fresh agent context by launching a new CLI process, initially
 `codex exec`.
 
+Codex tasks use `gpt-6-sol` with `high` reasoning by default. To override either
+setting for one project, set `model` or `model_reasoning_effort` in that
+project's `.codex/config.toml`. Agent Queue passes the effective values to
+`codex exec`, so user-level Codex model settings do not change queue defaults.
+
 ## Spreadsheet Layout
 
 Create a `Projects` tab with these headers:
@@ -133,7 +138,7 @@ Use `python3 -m agentq attach --project <projectId>` or
 embeds the agent that ran the task (e.g. `claude` or `codex`), so the attach
 command and the `watch` task-start log both name it. The task-start log also
 includes the configured model and reasoning level, for example
-`codex (gpt-5.6-sol, high reasoning)`. By default, `attach` starts with the last
+`codex (gpt-6-sol, high reasoning)`. By default, `attach` starts with the last
 80 lines; `--all` prints the whole prior log before following new output.
 
 ## Safety Defaults

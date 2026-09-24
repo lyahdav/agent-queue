@@ -35,6 +35,8 @@ MAX_FIX_RETRIES = 10
 DEFAULT_QUEUE_RETRY_SECONDS = 30
 DRAIN_CHECK_SECONDS = 1
 AGENT_FAILURE_OUTPUT_CHARS = 4000
+DEFAULT_CODEX_MODEL = "gpt-6-sol"
+DEFAULT_CODEX_REASONING_EFFORT = "high"
 
 
 def _read_toml_values(path: Path) -> dict[str, object]:
@@ -64,18 +66,10 @@ def _read_json_object(path: Path) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
-def _codex_runtime_settings(
-    repo_path: str | Path, home: Path, environ: Mapping[str, str]
-) -> tuple[str, str]:
-    codex_home = Path(environ.get("CODEX_HOME", home / ".codex"))
-    settings: dict[str, object] = {}
-    for path in (codex_home / "config.toml", Path(repo_path) / ".codex" / "config.toml"):
-        current = _read_toml_values(path)
-        for key in ("model", "model_reasoning_effort"):
-            if key in current:
-                settings[key] = current[key]
-    return str(settings.get("model") or "default"), str(
-        settings.get("model_reasoning_effort") or "default"
+def _codex_runtime_settings(repo_path: str | Path) -> tuple[str, str]:
+    settings = _read_toml_values(Path(repo_path) / ".codex" / "config.toml")
+    return str(settings.get("model") or DEFAULT_CODEX_MODEL), str(
+        settings.get("model_reasoning_effort") or DEFAULT_CODEX_REASONING_EFFORT
     )
 
 
@@ -122,9 +116,7 @@ def agent_runtime_description(
             project.repo_path, resolved_home, resolved_environment
         )
     else:
-        model, reasoning = _codex_runtime_settings(
-            project.repo_path, resolved_home, resolved_environment
-        )
+        model, reasoning = _codex_runtime_settings(project.repo_path)
     return f"{project.agent} ({model}, {reasoning} reasoning)"
 
 
@@ -151,6 +143,7 @@ def print_event(project_id: str, message: str) -> None:
 
 
 def codex_base_args(repo: str, sandbox: str) -> list[str]:
+    model, reasoning = _codex_runtime_settings(repo)
     return [
         "codex",
         "--ask-for-approval",
@@ -158,6 +151,10 @@ def codex_base_args(repo: str, sandbox: str) -> list[str]:
         "exec",
         "--cd",
         repo,
+        "--model",
+        model,
+        "--config",
+        f"model_reasoning_effort={reasoning}",
         "--sandbox",
         sandbox,
         "--color",
